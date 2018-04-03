@@ -1,0 +1,991 @@
+---
+title: "In Situ QA/QC"
+author: "Robert Williamson"
+date: "30 January 2018"
+fontsize: 12pt
+output:
+  rmarkdown::pdf_document:
+    fig_caption: yes        
+    includes:  
+      in_header: preamble.tex
+  html_document: default
+  word_document: default
+---
+<style type="text/css">
+
+h1.title {
+  font-size: 30px;
+  color: DarkRed;
+}
+h1 { /* Header 1 */
+  font-size: 20px;
+  color: DarkBlue;
+}
+h2 { /* Header 2 */
+    font-size: 18px;
+  color: DarkBlue;
+}
+h3 { /* Header 3 */
+  font-size: 16px;
+  color: DarkBlue;
+}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Literature and Manuals
+
+### *In-situ* QA - Notes from Xu & Ignatov *In situ SST Quality Monitor (iQuam)
+
+* duplicates
+* ranges
+* platform tracking
+* spike check for continuous data - for temperature differences > 1.6 K (for coastal moored buoys) a check is for > maximum gradient in time (1.0 K.h^-1^)
+* reference check\* - takes into account the accuracy of the reference field, difference in location of reference and point location, and the *in situ*  instrument noise (reference daily OI SST *v*2) see Lorenc & Hammon (1988)
+* cross platform - mutual consistency with nearby measurements
+
+*Reference Check - Lorenc & Hammon (1988)
+
+$$
+\begin{aligned}
+P\left ( O | \bar{E} \right )=N\left ( T_{o}-T_{r},\sigma _{o}^{2}+\sigma  _{r}^{2} \right )
+\end{aligned}
+$$
+The probabilty of the observation *O* being *T~o~* without a error $\bar{E}$ is from the normal distibution *N* for difference in observed and reference temperature and sum of SD of observed data and reference data. The SD of reference temperature $\sigma$~r~  included matching errors rising from the space and time difference between the reference and observed point data:
+
+$$
+\begin{aligned}
+\sigma_{r}=\sqrt{\sigma_{r-local}^2/4+\sigma_{r-base}^2}
+\end{aligned}
+$$
+The refence SD is $\sigma$~r-base~ and the local SD $\sigma$~r-local~ is 1/4 the SD of a 4 x 4 pixel x 3 day running window of the reference data. This is based on empirical studies (see Xu & Ignatov, 2010).
+
+### *In-situ* QA - Notes from U.S. Integrated Ocean Observing System, 2013. Manual for Real-Time Quality Control of In-situ Temperature and Salinity Data: A Guide to Quality Contraol and Quality Assurance of In-situ Temperature and Salinity Observations
+
+### *In-situ * QA - Notes from SADCO Quality Criteria for Time Series Data, Gihousen, 2008
+
+### *In-situ* QA - Notes from the National Data Buoy Center, G2009
+* limit and time continuity checks
+
+### *In-situ* QA - Notes from the World Ocean Database 2013 User's Manual, Johnson *et al*.,2013
+* lat, lon, date, duplicate checks
+* five degree square boxes designated 'coastal' by virtue of the number of one degree land blocks, are flagged if they exceeed 5 standard deviations - pg 42
+* check for excessive increase/decrease or excessive gradients (in the vertical) from the literature or from trends within the data
+* range checks for extreme values set for all seasons and years using frequency distributions, statistical analysis, literature values and atlases (for south Atlantic a range of 0 to 32 degC in the upper 100 m)
+
+### *In-situ* QA - Notes from EuroGOOS, 2011
+Real-time QC for time series temperature
+
+* regional range test
+* spike test
+* rate of change in time given as:
+
+$$
+\begin{aligned}
+v_{i}-v_{i-1}|+|v_{i}-v_{i+1}| \leq 2\times(2\times\sigma _{v})
+\end{aligned}
+$$
+
+# Suggested QA for the SACTN dataset
+
+## QC Steps
+
+1. reasonable range check - global anomalies:
+
+* for each West, South and East coast determine range from histograms - this will flag the obvious outliers
+
+2. spike test - local anomalies:
+
+* for each West, South and East coast determine the distribution for daily / hourly change
+* a spike will be a large increase/decrease followed by a large decrease/increase - consider the EuroGOOS example
+
+3. gradient check - local anomalies
+
+* determine distribution of daily temperature differentials for each month and what can be considered reasonable daily temperature changes
+
+4. extreme check
+
+* consider monthly (or longer sliding window if 30 days are too few) SD for the station time series
+* identify values exceeding either 4, 4.5 or 5 SD of the monthly SD
+* at this stage spikes will have been removed, therefore extreme values should last longer than a day
+
+
+5. mutual consistency
+
+
+6. ensemble reference check (an alternative to extreme check for short time-series)
+
+* determine regional monthly climatololgy from ensemble data
+* determine regional seasonal/monthly SD
+* check if data falls outside 4 SD
+
+&nbsp;
+
+Here, I consider two data sources from the same region; DEA and SAWS Mossel Bay data. The logic is to determine:
+
+* if regional statistics can be applied successfully to individual time series
+* if the identified QC issue is present in only one or more data sets (error vs. event)
+* if neighbouring data represent the same processes and thus can be cross validated
+
+
+# Sample visualization - Mossel Bay
+
+```{r, figs1, echo=FALSE, warning=FALSE, messsages=FALSE, fig.height=8, fig.cap="Time series of DEA and SAWS in situ temperatures"}
+library(ggplot2)
+library(gridExtra)
+library(tidyr)
+library(dplyr)
+
+dataMB_day_DEA <- read.csv("~/R/Docs/dataMB_day_DEA.csv", stringsAsFactors = FALSE)
+dataMB_day_SAWS <- read.csv("~/R/Docs/dataMB_day_SAWS.csv", stringsAsFactors = FALSE)
+
+dataMB_day_DEA$date <- as.Date(dataMB_day_DEA$date)
+dataMB_day_SAWS$date <- as.Date(dataMB_day_SAWS$date)
+
+dataMB_day_DEA$month <- as.numeric(format(dataMB_day_DEA$date, "%m"))
+nyear <- length(unique(dataMB_day_DEA$year))
+cc <- scales::seq_gradient_pal("darkgreen","gold","Lab")(seq(0,1,length.out=nyear))
+
+gd <- dataMB_day_DEA %>% 
+        group_by(year,month) %>% 
+        summarise(temp = median(temp, na.rm=T))
+
+gd2 <- gd %>% group_by(month) %>% summarise(temp = mean(temp, na.rm=T))
+
+ggplot(data=gd, aes(y=temp, x=month, col=as.factor(year))) + 
+  geom_line(lwd=2, alpha=0.5, na.rm=T) + 
+  geom_point(pch=21, size=2, na.rm=T) +
+  geom_line(data=gd2, size=1.8, col="red") +
+  scale_colour_manual(name="Year",values=cc) +
+  scale_x_continuous(breaks = 1:12, labels = month.abb[1:12]) +
+  ggtitle("Mossel Bay DEA Median Temperatures")
+
+ggplot(data=dataMB_day_DEA, aes(y=temp, x=month, col=as.factor(year))) + 
+  geom_point(pch=21, size=5, alpha=0.5) +
+  geom_line(data=gd2, size=1.8, col="red") +
+  scale_colour_manual(name="Year",values=cc) +
+  scale_x_continuous(breaks = 1:12, labels = month.abb[1:12]) +
+  ggtitle("Mossel Bay Median DEA Temperature")
+
+dataMB_day_DEA$month <- factor(dataMB_day_DEA$month, levels=c("Jan","Feb","Mar","Apr",
+                                                              "May","Jun","Jul","Aug",
+                                                              "Sep","Oct","Nov","Dec"))
+
+dataMB_day_SAWS$month <- factor(dataMB_day_SAWS$month, levels=c("Jan","Feb","Mar","Apr",
+                                                                "May","Jun","Jul","Aug",
+                                                                "Sep","Oct","Nov","Dec"))
+
+ggplot() + 
+  geom_line(data=dataMB_day_SAWS, aes(date, temp, color='SAWS'), size=1, alpha=0.8) +
+  geom_line(data=dataMB_day_DEA, aes(date, temp, color='DEA'), size=1) +
+  geom_line(data=dataMB_day_DEA, aes(date, diff, color='Difference'), size=1) +
+  scale_x_date(date_labels = "%Y", date_breaks = "2 year") + xlab("") + 
+  ylab("Temperature") +
+  scale_colour_manual("", 
+                    breaks = c("DEA", "SAWS", "Difference"),
+                    values = c("DEA"="blue", "SAWS"="red", 
+                               "Difference"="darkgreen"))
+```
+
+```{r, figs2, echo=FALSE, warning=FALSE, fig.width=6, fig.height=2, fig.cap="Temperature difference between SAWS and DEA temperatures"}
+ggplot() + 
+  geom_line(data=dataMB_day_DEA, aes(date, diff), size=.8) +
+  scale_x_date(date_labels = "%Y", date_breaks = "1 year") + 
+  xlab("") + ylab("Temperature") + 
+  ggtitle("Temperature Difference (SAWS-DEA)")
+```
+
+&nbsp;
+
+* differences can be large (up to 10$^\circ$C)
+* large differences appear seasonal
+
+&nbsp;
+
+```{r, figs3, echo=FALSE, message=FALSE, warning=FALSE, fig.height=3, fig.width=6, fig.cap="Histogram of SAWS and DEA data and distibution of SAWS temperatures with decimals .0 and .5 "}
+p1 <- qplot(dataMB_day_DEA$temp, geom = "histogram",binwidth=0.2, xlab="Tenperature", xlim=c(10.25,28.25), main="Mossel Bay DEA",asp=1)
+p2 <- qplot(dataMB_day_SAWS$temp, geom = "histogram", binwidth=0.5, xlab = "Temperature", xlim=c(10.25,28.25), main="Mossel Bay SAWS",asp=1)
+
+# Check the SAWS data for decimal bias
+revtrunc <- function(x) { x - floor(x) }
+check <- revtrunc(dataMB_day_SAWS$temp)
+p3 <- qplot(check, geom="histogram", binwidth=0.5, xlim=c(-0.25,0.75), main="SAWS decimal bias",xlab = "Decimal Temp x.0/y.5", asp=1)
+
+grid.arrange(p1,p2,p3,ncol=3)
+```
+
+&nbsp;
+
+&nbsp;
+
+```{r, tab1, echo=FALSE, results='asis', warning=FALSE}
+library(knitr)
+# plot the statistics
+table1 <- data.frame(mean=numeric(),median=numeric(), std=numeric(),
+                     max=numeric(), min=numeric(), stringsAsFactors = F)
+t1 <- c(mean(dataMB_day_DEA$temp, na.rm = T), median(dataMB_day_DEA$temp,na.rm = T), 
+        sd(dataMB_day_DEA$temp,na.rm = T), max(dataMB_day_DEA$temp,na.rm = T),
+        min(dataMB_day_DEA$temp,na.rm = T))
+t2 <- c(mean(dataMB_day_SAWS$temp, na.rm = T), median(dataMB_day_SAWS$temp,na.rm = T), 
+        sd(dataMB_day_SAWS$temp,na.rm = T), max(dataMB_day_SAWS$temp,na.rm = T),
+        min(dataMB_day_SAWS$temp,na.rm = T))
+table1[nrow(table1)+1,] <- t1
+table1[nrow(table1)+1,] <- t2
+row.names(table1) <- c("Mossel Bay-DEA","Mossel Bay-SAWS")
+kable(table1,caption = "Mossel Bay Summary Statistics")
+```
+
+&nbsp;
+
+&nbsp;
+
+```{r, figs5, fig.align='center', echo=FALSE, message=FALSE, warning=FALSE, fig.height=2, fig.width=6}
+load("~/R_projects-CS/data-extraction/ExtractInsitu/Input/SACTNdaily_v4.1.RData")
+load("~/R_projects-CS/data-extraction/ExtractInsitu/Input/SACTNhourly_v4.1.RData")
+
+seas <- list(c("12","01","02"),c("03","04","05"),c("06","07","08"),c("09","10","11"))
+
+dataMB_day_DEAsub <- lapply(seas, function(x) subset(SACTNdaily_v4.1, site=="Mossel Bay" & src=="DEA" & substr(date, 6,7) %in% x))
+dataMB_day_SAWSsub <- lapply(seas, function(x) subset(SACTNdaily_v4.1, site=="Mossel Bay" & src=="SAWS" & substr(date, 6,7) %in% x))
+
+p1 <- lapply(dataMB_day_DEAsub, function(x) qplot(x$temp, geom = "histogram", binwidth=0.2, xlab="Tenperature",main="DEA", xlim=c(10,25), asp=1))
+p2 <- lapply(dataMB_day_SAWSsub, function(x) qplot(x$temp, geom = "histogram", binwidth=0.5, xlab = "Temperature", main="SAWS",xlim=c(10,25),asp=1))
+
+do.call(grid.arrange,c(p1, ncol=4))
+```
+
+```{r, figs6, fig.align='center', echo=FALSE, message=FALSE, warning=FALSE, fig.height=2, fig.width=6, fig.cap="Histograms of seasonal (DJF) data from DEA = 0.2$^\\circ$C and SAWS = 0.5$^\\circ$C bins"}
+do.call(grid.arrange,c(p2, ncol=4))
+```
+
+&nbsp;
+
+```{r, figs7, fig.align='center', echo=FALSE, message=FALSE, warning=FALSE, fig.height=2, fig.width=6}
+p1 <- lapply(dataMB_day_DEAsub, function(x) qplot(x$temp, geom = "histogram", binwidth=1,xlab="Tenperature",main="DEA", xlim=c(10,25), asp=1))
+p2 <- lapply(dataMB_day_SAWSsub, function(x) qplot(x$temp, geom = "histogram",
+binwidth=1,xlab = "Temperature", main="SAWS",xlim=c(10,25),asp=1))
+do.call(grid.arrange,c(p1, ncol=4))
+```
+
+```{r, figs8, fig.align='center', echo=FALSE, message=FALSE, warning=FALSE, fig.height=2, fig.width=6, fig.cap="Histogram of seasonal data (DJF) from DEA and SAWS = 1.0$^\\circ$C bins"}
+do.call(grid.arrange,c(p2, ncol=4))
+```
+
+* there is a clear decimal bias in the SAWS data with rounding to x.0 more prevalent than rounding to x.5
+* the range and seasonal distributions of the two data ets appears consistent
+
+&nbsp;
+
+```{r, figs9, echo=FALSE,warning=FALSE, fig.width=5, fig.height=4, fig.cap="Scatterplot of DEA vs SAWS temperatures. The 1:1 line is in blue and the red dashed line indicates the line where the SAWS data is 1$^\\circ$C less than the DEA"}
+ggplot(dataMB_day_DEA, aes(x=temp, y=SAWS, color=month, asp=1)) +
+  xlab("DEA Temperature") +
+  ylab("SAWS Temperature") +
+  geom_point() +
+  geom_abline(col="blue",slope=1, intercept=0, size=.8) +
+  geom_abline(col="red",slope=1, intercept=-1, size=.8, linetype="dashed") +
+  coord_fixed()
+```
+
+&nbsp;
+
+* the SAWS data are frequently warmer than the DEA
+* lower SAWS temperatures (mostly > -1.0$^\circ$C - red dased line) may by due to rounding bias in combination with resolution
+
+&nbsp;
+
+```{r, figs10, echo=FALSE, fig.width=5, fig.height=8, warning=FALSE, fig.cap="Comparison of monthly match-up temperature histograms between SAWS and DEA data"}
+p1 <- ggplot(aes(x = temp, fill = month), data = dataMB_day_DEA) +
+  geom_histogram(binwidth=.5) +
+  xlim(10,28) +
+  facet_grid(month ~ ., margins = FALSE, scales = "free") +
+  ggtitle("Mossel Bay DEA Temp.") +
+  scale_fill_discrete(guide=FALSE)
+p2 <- ggplot(aes(x = SAWS, fill = month), data = dataMB_day_DEA) +
+  geom_histogram(binwidth=.5) +
+  xlim(10,28) +
+  facet_grid(month ~ ., margins = FALSE, scales = "free") +
+  ggtitle("Mossel Bay SAWS Temp.") +
+  scale_fill_discrete(guide=FALSE)
+
+grid.arrange(p1,p2,ncol=2)
+```
+
+&nbsp;
+
+* the range of the two data sets moderately consistent
+* lower temperatures observed in summer & autumn DEA data are not often detected in the SAWS
+* extreme warm & coled events in winter & spring are not detected by the DEA data (anomalies/outliers or errors?)
+
+&nbsp;
+
+&nbsp;
+
+```{r, figs11, echo=FALSE, fig.height=6, fig.width=6, warning=FALSE, fig.cap="Monthly temperature differences between SAWS and DEA data"}
+ggplot(aes(x = diff, fill = factor(month)), data = dataMB_day_DEA) +
+  geom_histogram(binwidth=.5) +
+  facet_grid(month ~ ., margins = FALSE, scales = "free") +
+  ggtitle("Mossel Bay SAWS-DEA Temp. Diff") +
+  geom_vline(aes(xintercept = 0), color="red", linetype="dashed", size=1) +
+  scale_fill_discrete(guide=FALSE)
+```
+
+* there is a clear seasonal pattern in the differentials
+
+&nbsp;
+
+&nbsp;
+
+**Conclusion #1**
+
+1. The histograms of monthly temperature indicate that the data are not normally distributed with negative skewness in the warmer months and evidenceo of kurtosis in the cooler months. Bi-modality is also seen. One cannot simply use measure of seasonal or monthly means and variance to detect outliers in the data. It will have to be done on each month within each year or a sliding window over the time series.
+
+2. The SAWS and DEA temperature recorders appear to be recording different processes likely due to the location and protocol of collecting data. It seems reasonable to assume the SAWS data, which is collected manually and often in shallower water, is more prone to solar heating in the summer months and possible ambient low air temperature in winter. Cross validation cannot be performed without details of the exact location (depth, exposure to waves and sunlight, time of collection, sampling strategy) of each time series. This info must be included in the metadata.
+
+3. For QC it may be necessary to evaluate data separately or according to instrument and sampling protocol.
+
+# Analysis of spikes and gradients - Mossel Bay
+
+Note, in the images below the limits of the percentiles indicate large differences from some months to the next. To prevent similar values from being flagged as anomalies in one month but not the next it will be better to use a 30 day moving window for calculation of SD or percentiles.
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8, fig.cap="Mossel Bay DEA seasonal, detrended and residual temperatures."}
+ggplot() +
+  geom_line(data=dataMB_day_DEA, aes(x=date, y=raw), size=1) +
+  geom_line(data=dataMB_day_DEA, aes(x=date, y=seastrend), colour="blue", size=1) +
+  geom_line(data=dataMB_day_DEA, aes(x=date, y=trend), colour="red", size=1)
+```
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8, fig.cap="Mossel Bay DEA raw first difference and detrended first difference."}
+p1 <- ggplot() +
+  geom_line(data=dataMB_day_DEA, aes(x=date, y=grad), colour="blue", size=1)
+p2 <- ggplot() +
+  geom_line(data=dataMB_day_DEA, aes(x=date, y=grad_res), colour="red", size=1)
+grid.arrange(p1,p2,nrow=2)
+```
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8, fig.cap="Mossel Bay DEA seasonal temperatures, detrended seasonal temperatures and detrended + first difference temperatures."}
+p1 <- ggplot(aes(x = temp, fill = month), data = dataMB_day_DEA) +
+  geom_histogram(binwidth=.5) +
+  facet_grid(month ~ ., margins = FALSE, scales = "free") +
+  ggtitle("Mossel Bay DEA Temp.") +
+  scale_fill_discrete(guide=FALSE)
+
+p2 <- ggplot(aes(x = seastrend, fill = month), data = dataMB_day_DEA) +
+  geom_histogram(binwidth=.5) +
+  facet_grid(month ~ ., margins = FALSE, scales = "free") +
+  ggtitle("Mossel Bay DEA Detrended Temp.") +
+  scale_fill_discrete(guide=FALSE)
+
+p3 <- ggplot(aes(x = graddetrend, fill = month), data = dataMB_day_DEA) +
+  geom_histogram(binwidth=.05) +
+  xlim(-4,4) +
+  facet_grid(month ~ ., margins = FALSE, scales = "free") +
+  ggtitle("Mossel Bay DEA Detrend. + FirstDiff Temp.") +
+  scale_fill_discrete(guide=FALSE)
+
+grid.arrange(p1,p2,p3, ncol=3)
+```
+
+```{r, echo=FALSE, warning=FALSE, fig.height=6, fig.cap="Monthly first difference values by year. For testing the change in variance, the data are required to be normally distributed with constant mean."}
+stat_grad <- dataMB_day_DEA %>% group_by(month,year) %>% summarise(mean = mean(grad, na.rm=T),sd = sd(grad, na.rm=T))
+stat_grad$year <- as.Date(paste0(stat_grad$year,"-01-01"), format="%Y-%m-%d")
+
+xint <- data.frame(year=unique(stat_grad$year))
+xint <- data.frame(year=xint[seq(2,nrow(xint),2),])
+xint$grp <- rep_len(1:3, length.out = nrow(xint))
+
+group.colors <- c("red","green","yellow")
+
+ ggplot(data = stat_grad, aes(y=mean, x=year, group=month)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd), size=.2) +
+  geom_hline(aes(yintercept = 0), color="red", size=.5) +
+  geom_vline(data=xint, aes(xintercept = year, color=factor(grp)), size=.3, show.legend = F) +
+  facet_grid(month ~ ., margins = FALSE, scales = "free") +
+  ggtitle("Mossel Bay First Difference.") +
+  #scale_fill_discrete(guide=FALSE) +
+  scale_x_date(date_labels = "%Y", date_breaks = "2 year") +
+  scale_color_manual(values=group.colors) +
+  theme(axis.text.x = element_text(angle = 45))
+```
+
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8, fig.cap="Mossel Bay DEA daily gradients of temperature and residuals. Blue lines indicate the 1 and 99 percentiles."}
+# get the 1 and 99 percentiies
+stat_DEA_percres <- dataMB_day_DEA %>% group_by(month) %>% summarise(up99 = quantile(grad_res, c(0.01, 0.99), na.rm=T)[[2]], lo01 = quantile(grad_res, c(0.01, 0.99), na.rm=T)[[1]])
+
+stat_DEA_percres$month <- factor(stat_DEA_percres$month, levels=c("Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"))
+
+p1 <- ggplot(aes(x = res, fill = factor(month)), data = dataMB_day_DEA) +
+  geom_histogram(binwidth=.05) +
+  xlim(-4,4) +
+  geom_vline(aes(xintercept = 0)) +
+  facet_grid(month ~ ., margins = FALSE, scales = "free") +
+  ggtitle("Mossel Bay DEA Residuals") +
+  scale_fill_discrete(guide=FALSE)
+
+p2 <- ggplot(aes(x = res, fill = factor(month)), data = dataMB_day_SAWS) +
+  geom_histogram(binwidth=.05) +
+  geom_vline(aes(xintercept = 0)) +
+  facet_grid(month ~ ., margins = FALSE, scales = "free") +
+  ggtitle("Mossel Bay SAWS Residuals") +
+  scale_fill_discrete(guide=FALSE)
+
+grid.arrange(p1,p2,ncol=2)
+```
+
+``` {r, echo=FALSE, warning=FALSE, fig.height=8, fig.cap="Mossel Bay DEA daily gradients of temperature and residuals. Blue lines indicate the 1 or 99 percentiles."}
+
+p1 <- ggplot(aes(x = grad, fill = factor(month)), data = dataMB_day_DEA) +
+  geom_histogram(binwidth=.05) +
+  xlim(-4,4) +
+  geom_vline(aes(xintercept = 0)) +
+  facet_grid(month ~ ., margins = FALSE, scales = "free") +
+  ggtitle("Mossel Bay DEA Temp. Grad.") +
+  scale_fill_discrete(guide=FALSE)
+
+p2 <- ggplot(aes(x = grad_res, fill = factor(month)), data = dataMB_day_DEA) +
+  geom_histogram(binwidth=.05) +
+  geom_vline(aes(xintercept = 0)) +
+  facet_grid(month ~ ., margins = FALSE, scales = "free") +
+  geom_vline(data=stat_DEA_percres, aes(xintercept=lo01), colour="blue") +
+  geom_vline(data=stat_DEA_percres, aes(xintercept=up99), colour="blue") +
+  ggtitle("Mossel Bay DEA Res. Grad.") +
+  scale_fill_discrete(guide=FALSE)
+
+grid.arrange(p1,p2,ncol=2)
+```
+
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8, fig.cap="Mossel Bay SAWS daily gradients of temperature and residuals. Blue lines indicate the 1 or 99 percentiles."}
+stat_SAWS_percres <- dataMB_day_SAWS %>% group_by(month) %>% summarise(up99 = quantile(grad_res, c(0.01, 0.99), na.rm=T)[[2]], lo01 = quantile(grad_res, c(0.01, 0.99), na.rm=T)[[1]])
+
+stat_SAWS_percres$month <- factor(stat_SAWS_percres$month, levels=c("Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"))
+
+p1 <- ggplot(aes(x = grad, fill = factor(month)), data = dataMB_day_SAWS) +
+  geom_histogram(binwidth=.05) +
+  xlim(-4,4) +
+  geom_vline(aes(xintercept = 0)) +
+  facet_grid(month ~ ., margins = FALSE, scales = "free") +
+  ggtitle("Mossel Bay SAWS Temp. Grad.") +
+  scale_fill_discrete(guide=FALSE)
+
+p2 <- ggplot(aes(x = grad_res, fill = factor(month)), data = dataMB_day_SAWS) +
+  geom_histogram(binwidth=.05) +
+  geom_vline(aes(xintercept = 0)) +
+  facet_grid(month ~ ., margins = FALSE, scales = "free") +
+  geom_vline(data=stat_SAWS_percres, aes(xintercept=lo01), colour="blue") +
+  geom_vline(data=stat_SAWS_percres, aes(xintercept=up99), colour="blue") +
+  ggtitle("Mossel Bay SAWS Res. Grad.") +
+  scale_fill_discrete(guide=FALSE)
+
+grid.arrange(p1,p2,ncol=2)
+```
+
+
+```{r, echo=FALSE, warning=FALSE, fig.height=5, message=FALSE, fig.cap="DEA and SAWS temperatures with outliers determined by 1 or 99 percentiles of residual gradients. Residuals are indicated by vertical black line."}
+getOutlierPer <- function(df, mon, hi, lo){
+  idx <- which(df$month == mon & df$grad_res > lo & df$grad_res < hi)
+}
+
+# DEA data
+percres_ls <- split(stat_DEA_percres, seq(nrow(stat_DEA_percres)))
+dataMB_day_DEA$outlierPer <- TRUE
+outlier_ls <- lapply(percres_ls, function(x) getOutlierPer(dataMB_day_DEA, x[[1]], x[[2]], x[[3]]))
+
+for (i in 1:12){
+  dataMB_day_DEA$outlierPer[outlier_ls[[i]]] <- FALSE
+}
+# get index for NA and replace TRUE with NA
+idx <- is.na(dataMB_day_DEA$grad_res)
+dataMB_day_DEA$outlierPer[idx] <- NA
+
+# SAWS data
+percres_ls <- split(stat_SAWS_percres, seq(nrow(stat_SAWS_percres)))
+dataMB_day_SAWS$outlierPer <- TRUE
+outlier_ls <- lapply(percres_ls, function(x) getOutlierPer(dataMB_day_SAWS, x[[1]], x[[2]], x[[3]]))
+
+for (i in 1:12){
+  dataMB_day_SAWS$outlierPer[outlier_ls[[i]]] <- FALSE
+}
+# get index for NA and replace TRUE with NA
+idx <- is.na(dataMB_day_SAWS$grad_res)
+dataMB_day_SAWS$outlierPer[idx] <- NA
+
+p1 <- ggplot() + 
+  geom_line(data=dataMB_day_DEA, aes(date, temp), colour="blue", size=1) +
+  geom_vline(xintercept=as.numeric(dataMB_day_DEA$date[dataMB_day_DEA$outlierPer]), size=.5) +
+  scale_x_date(date_labels = "%Y", date_breaks = "2 year") + xlab("") + 
+  ylab("Temperature") +
+  ggtitle("DEA Temperature")
+
+p2 <- ggplot() + 
+  geom_line(data=dataMB_day_SAWS, aes(date, temp), colour="red", size=1) +
+  geom_vline(xintercept=as.numeric(dataMB_day_SAWS$date[dataMB_day_SAWS$outlierPer]), size=.5) +
+  scale_x_date(date_labels = "%Y", date_breaks = "2 year") + xlab("") + 
+  ylab("Temperature") +
+  ggtitle("SAWS Temperature")
+
+grid.arrange(p1, p2, nrow=2)
+
+```
+
+
+```{r, echo=FALSE, fig.height=5, warning=FALSE, message=FALSE, fig.cap="Outliers detected using 4x standard deviations from mean monthly residual gradients"}
+library(dplyr)
+stat_DEA_monG <- dataMB_day_DEA %>% group_by(month) %>% summarise(mean = mean(grad_res, na.rm=T), sd = sd(grad_res, na.rm=T))
+stat_SAWS_monG <- dataMB_day_SAWS %>% group_by(month) %>% summarise(mean = mean(grad_res, na.rm=T), sd = sd(grad_res, na.rm=T))
+
+getOutlierSD <- function(df, mon, mean, sd){
+  lo <- mean-(4*sd)
+  hi <- mean+(4*sd)
+  idx <- which(df$month == mon & df$grad_res > lo & df$grad_res < hi)
+}
+
+# DEA data
+sdres_ls <- split(stat_DEA_monG, seq(nrow(stat_DEA_monG)))
+dataMB_day_DEA$outlierSD <- TRUE
+outlier_ls <- lapply(sdres_ls, function(x) getOutlierSD(dataMB_day_DEA, x[[1]], x[[2]], x[[3]]))
+
+for (i in 1:12){
+  dataMB_day_DEA$outlierSD[outlier_ls[[i]]] <- FALSE
+}
+
+# get index for NA and replace TRUE with NA
+idx <- is.na(dataMB_day_DEA$grad_res)
+dataMB_day_DEA$outlierSD[idx] <- NA
+
+# SAWS data
+sdres_ls <- split(stat_SAWS_monG, seq(nrow(stat_SAWS_monG)))
+dataMB_day_SAWS$outlierSD <- TRUE
+outlier_ls <- lapply(sdres_ls, function(x) getOutlierSD(dataMB_day_SAWS, x[[1]], x[[2]], x[[3]]))
+
+for (i in 1:12){
+  dataMB_day_SAWS$outlierSD[outlier_ls[[i]]] <- FALSE
+}
+# get index for NA and replace TRUE with NA
+idx <- is.na(dataMB_day_SAWS$grad_res)
+dataMB_day_SAWS$outlierSD[idx] <- NA
+
+p1 <- ggplot() + 
+  geom_line(data=dataMB_day_DEA, aes(date, temp), colour="blue", size=1) +
+  geom_vline(xintercept=as.numeric(dataMB_day_DEA$date[dataMB_day_DEA$outlierSD]), size=.3, colour="darkorange") +
+  scale_x_date(date_labels = "%Y", date_breaks = "2 year") + xlab("") + 
+  ylab("Temperature") +
+  ggtitle("DEA Temperature")
+
+p2 <- ggplot() + 
+  geom_line(data=dataMB_day_SAWS, aes(date, temp), colour="red", size=1) +
+  geom_vline(xintercept=as.numeric(dataMB_day_SAWS$date[dataMB_day_SAWS$outlierSD]), size=.3, colour="darkorange") +
+  scale_x_date(date_labels = "%Y", date_breaks = "2 year") + xlab("") + 
+  ylab("Temperature") +
+  ggtitle("SAWS Temperature")
+
+grid.arrange(p1, p2, nrow=2)
+```
+
+
+```{r, echo=FALSE, warnings=FALSE, messages=FALSE, fig.height=5, warning=FALSE, message=FALSE, fig.cap="Outliers detected using 4x standard deviations of monthly temperatures"}
+library(dplyr)
+stat_DEA_monT <- dataMB_day_DEA %>% group_by(month) %>% summarise(mean = mean(temp, na.rm=T), sd = sd(temp, na.rm=T))
+stat_SAWS_monT <- dataMB_day_SAWS %>% group_by(month) %>% summarise(mean = mean(temp, na.rm=T), sd = sd(temp, na.rm=T))
+
+getOutlierT <- function(df, mon, mean, sd){
+  lo <- mean-(4*sd)
+  hi <- mean+(4*sd)
+  idx <- which(df$month == mon & df$temp > lo & df$temp < hi)
+}
+
+# DEA data
+sdres_ls <- split(stat_DEA_monT, seq(nrow(stat_DEA_monT)))
+dataMB_day_DEA$outlierT <- TRUE
+outlier_ls <- lapply(sdres_ls, function(x) getOutlierT(dataMB_day_DEA, x[[1]], x[[2]], x[[3]]))
+
+for (i in 1:12){
+  dataMB_day_DEA$outlierT[outlier_ls[[i]]] <- FALSE
+}
+# get index for NA and replace TRUE with NA
+idx <- is.na(dataMB_day_DEA$temp)
+dataMB_day_DEA$outlierT[idx] <- NA
+
+# SAWS data
+sdres_ls <- split(stat_SAWS_monT, seq(nrow(stat_SAWS_monT)))
+dataMB_day_SAWS$outlierT <- TRUE
+outlier_ls <- lapply(sdres_ls, function(x) getOutlierT(dataMB_day_SAWS, x[[1]], x[[2]], x[[3]]))
+
+for (i in 1:12){
+  dataMB_day_SAWS$outlierT[outlier_ls[[i]]] <- FALSE
+}
+# get index for NA and replace TRUE with NA
+idx <- is.na(dataMB_day_SAWS$temp)
+dataMB_day_SAWS$outlierT[idx] <- NA
+
+p1 <- ggplot() + 
+  geom_line(data=dataMB_day_DEA, aes(date, temp), colour="blue", size=1) +
+  geom_vline(xintercept=as.numeric(dataMB_day_DEA$date[dataMB_day_DEA$outlierT]), size=.5, colour="darkorange") +
+  scale_x_date(date_labels = "%Y", date_breaks = "2 year") + xlab("") + 
+  ylab("Temperature") +
+  ggtitle("DEA Temperature")
+
+p2 <- ggplot() + 
+  geom_line(data=dataMB_day_DEA[1550:1750,], aes(date, temp), colour="blue", size=1) +
+  geom_point(data=dataMB_day_DEA[1550:1750,], aes(date, temp), colour="black", size=1) +
+  geom_vline(xintercept=as.numeric(dataMB_day_DEA$date[dataMB_day_DEA$outlierT]), colour="darkorange", size=.5) +
+  scale_x_date(date_labels = "%b", date_breaks = "month") + xlab("") + 
+  ylab("Temperature") +
+  ggtitle("DEA Temperature")
+
+p3 <- ggplot() +
+  geom_line(data=dataMB_day_DEA[2650:2850,], aes(date, temp), colour="blue", size=1) +
+  geom_point(data=dataMB_day_DEA[2650:2850,], aes(date, temp), colour="black", size=1) +
+  geom_vline(xintercept=as.numeric(dataMB_day_DEA$date[dataMB_day_DEA$outlierT]), colour="darkorange", size=.5) +
+  scale_x_date(date_labels = "%b", date_breaks = "month") + xlab("") +
+  ylab("Temperature") +
+  ggtitle("DEA Temperature")
+
+grid.arrange(p1, arrangeGrob(p2, p3, ncol = 2), nrow = 2)
+```
+
+```{r, echo=FALSE, fig.height=5, warning=FALSE, message=FALSE, fig.cap="Outliers detected using 4x standard deviations of monthly temperatures"}
+p1 <- ggplot() + 
+  geom_line(data=dataMB_day_SAWS, aes(date, temp), colour="red", size=1) +
+  geom_vline(xintercept=as.numeric(dataMB_day_SAWS$date[dataMB_day_SAWS$outlierT]), size=.5, colour="darkorange") +
+  scale_x_date(date_labels = "%Y", date_breaks = "2 year") + xlab("") + 
+  ylab("Temperature") +
+  ggtitle("SAWS Temperature")
+  
+  p2 <- ggplot() + 
+  geom_line(data=dataMB_day_SAWS[5550:5820,], aes(date, temp), colour="red", size=1) +
+  geom_point(data=dataMB_day_SAWS[5550:5820,], aes(date, temp), colour="black", size=1) +
+  geom_vline(xintercept=as.numeric(dataMB_day_SAWS$date[dataMB_day_SAWS$outlierT]), colour="darkorange", size=.5) +
+  scale_x_date(date_labels = "%b", date_breaks = "month") + xlab("") + 
+  ylab("Temperature") +
+  ggtitle("SAWS Temperature")
+
+p3 <- ggplot() +
+  geom_line(data=dataMB_day_SAWS[7500:7600,], aes(date, temp), colour="red", size=1) +
+  geom_point(data=dataMB_day_SAWS[7500:7600,], aes(date, temp), colour="black", size=1) +
+  geom_vline(xintercept=as.numeric(dataMB_day_SAWS$date[dataMB_day_SAWS$outlierT]), colour="darkorange", size=.5) +
+  scale_x_date(date_labels = "%b", date_breaks = "month") + xlab("") +
+  ylab("Temperature") +
+  ggtitle("SAWS Temperature")
+
+grid.arrange(p1, arrangeGrob(p2, p3, ncol = 2), nrow = 2)   
+```
+
+
+```{r, echo=FALSE, fig.height=5, warning=FALSE, message=FALSE, fig.cap="Spikes detected using adjacent pos/neg or neg/pos gradients both greater than 4x standard deviations of monthly residual gradients"}
+
+getSpike <- function(df, mon, mean, sd){
+  lo <- mean-(4*sd)
+  hi <- mean+(4*sd)
+  idx <- which(df$month == mon & df$grad < lo & df$grad[-1] > hi |
+               df$month == mon & df$grad > hi & df$grad[-1] < lo)
+}
+
+# DEA data
+spikeres_ls <- split(stat_DEA_monG, seq(nrow(stat_DEA_monG)))
+dataMB_day_DEA$spike <- FALSE
+spike_ls <- lapply(spikeres_ls, function(x) getSpike(dataMB_day_DEA, x[[1]], x[[2]], x[[3]]))
+
+for (i in 1:12){
+  dataMB_day_DEA$spike[spike_ls[[i]]] <- TRUE
+}
+
+# get index for NA and replace TRUE with NA
+idx <- is.na(dataMB_day_DEA$grad)
+dataMB_day_DEA$spike[idx] <- NA
+
+p1 <- ggplot() + 
+  geom_line(data=dataMB_day_DEA, aes(date, temp), colour="blue", size=1) +
+  geom_vline(xintercept=as.numeric(dataMB_day_DEA$date[dataMB_day_DEA$spike]), size=.5, colour="darkgreen") +
+  scale_x_date(date_labels = "%Y", date_breaks = "2 year") + xlab("") + 
+  ylab("Temperature") +
+  ggtitle("DEA Temperature")
+
+p2 <- ggplot() + 
+  geom_line(data=dataMB_day_DEA[850:1000,], aes(date, temp), colour="blue", size=1) +
+  geom_point(data=dataMB_day_DEA[850:1000,], aes(date, temp), colour="black", size=1) +
+  geom_vline(xintercept=as.numeric(dataMB_day_DEA$date[dataMB_day_DEA$spike]), colour="darkgreen", size=.5) +
+  scale_x_date(date_labels = "%b", date_breaks = "month") + xlab("") + 
+  ylab("Temperature") +
+  ggtitle("DEA Temperature")
+
+p3 <- ggplot() +
+  geom_line(data=dataMB_day_DEA[4050:4150,], aes(date, temp), colour="blue", size=1) +
+  geom_point(data=dataMB_day_DEA[4050:4150,], aes(date, temp), colour="black", size=1) +
+  geom_vline(xintercept=as.numeric(dataMB_day_DEA$date[dataMB_day_DEA$spike]), colour="darkgreen", size=.5) +
+  scale_x_date(date_labels = "%b", date_breaks = "month") + xlab("") +
+  ylab("Temperature") +
+  ggtitle("DEA Temperature")
+
+grid.arrange(p1, arrangeGrob(p2, p3, ncol = 2), nrow = 2)   
+
+```
+
+# Analysis of change in variance and mean - Mossel Bay
+
+## Data distribution
+
+### Raw data
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8, fig.cap="Mossel Bay DEA Temperature Distribution"}
+
+require(fitdistrplus)
+fit.norm <- fitdist(dataMB_day_DEA$temp[-which(is.na(dataMB_day_DEA$temp))], "norm")
+plot(fit.norm, breaks=20)
+```
+
+The raw data does not follow a normal distribution. 
+
+### Distribution of residuals from STL decomposition
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8, fig.cap="DEA temperature residual distribution from STL decomposition"}
+require(stlplus)
+# create ts object
+doy <- format(dataMB_day_DEA$date[1], "%j")
+yr <- format(dataMB_day_DEA$date[1], "%Y")
+
+ts_DEAtemp <- ts(dataMB_day_DEA$temp, frequency=365, start = c(as.numeric(yr),as.numeric(doy)))
+
+decmp_DEA <- stlplus(ts_DEAtemp, s.window="periodic")[[1]]
+plot(stlplus(ts_DEAtemp, s.window="periodic"),main="Temperature Decomp")
+fit.norm <- fitdist(decmp_DEA$remainder, "norm")       # normal
+plot(fit.norm, breaks=20)
+norm_DEA <- decmp_DEA$remainder    # accept residuals as normal
+```
+
+### Distribution of residuals from GAMM model
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8, fig.cap="SST GAMM Residual Distribution"}
+require(mgcv)
+gam_DEA <- dataMB_day_DEA[c(date, temp, month, year)]
+gam_DEA$doy <- as.numeric(format(gam_DEA$date, "%j"))
+gam_DEA$datenum <- seq_along(gam_DEA$date)
+
+p3 <-
+  gamm(
+    temp ~ s(doy, bs = "cc", k = 365) + s(datenum, bs = "cr"),
+    correlation = corARMA(form = ~ 1 | year, p=3),control = ctrl,
+    data = gam_DEA)
+
+res_gam <- as.numeric(p3$gam$residuals)
+fit.norm <- fitdist(res_gam, "norm")       # normal
+plot(fit.norm, breaks=20)
+```
+
+First interpolate the missing data with forecast::na.interp and then apply a low pass smoothing spline. The low pass spline is compared to a 61 day linear decay WMA model.
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8, fig.cap="SST Residual Distribution"}
+require(forecast)
+doy <- format(dataMB_day_DEA$date[1], "%j")
+yr <- format(dataMB_day_DEA$date[1], "%Y")
+ts_DEA <- ts(dataMB_day_DEA$temp, frequency=365, start = c(as.numeric(yr),
+                                                           as.numeric(doy)))
+fit <- na.interp(ts_DEA)
+lowpass_spline <- smooth.spline(fit, spar=0.05)
+
+window_make <- function(len){
+  window_point <- c(seq((len+1)/2,2,-1),1,seq(2,(len+1)/2,1))
+  return(window_point)
+}
+window_size <- 61                         # total window length in days
+window_point <- window_make(window_size)  # time points before and after t
+#weights <- 2/((window_point)+1)          # exponential weights
+weights <- 0 + (max(window_point)-(window_point-1))/
+  max(window_point)                      # linear weights
+#weights <- window_point/window_point     # equal weights
+
+data_flt4_lin <- filter(ts_DEA, weights/sum(weights), method="convolution", sides=2)
+
+plot(fit, col="gray")
+lines(lowpass_spline, col="blue", lwd=2)
+lines(data_flt4_lin, col="red", lwd=2)
+```
+
+### Comparisong of STL, GAMM models and WMA GAMM
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8, fig.cap="SST Residual Distribution"}
+require(ggplot2)
+require(stlplus)
+require(mgcv)
+
+seas_stl <- decmp_DEA$seasonal
+seas_gam_temp <- p3$lme$fitted[,2] - p3$lme$fitted[,1]   # excludes trend
+# get the NA index and remap seasonal GAM
+idx <- which(!is.na(dataMB_day_DEA$temp))
+seas_gam <- rep(NA, length(seas_stl))
+seas_gam[idx] <- seas_gam_temp
+
+df_seas <- data.frame(stl=seas_stl, gam=seas_gam, x=seq_along(seas_stl))
+ggplot(df_seas) + 
+  geom_line(aes(y=stl, x=x), col="red") + 
+  geom_line(aes(y=gam, x=x),col="blue")
+
+res_stl <- norm_DEA[-which(is.na(norm_DEA))]
+res_stl <- norm_DEA
+df_res <- data.frame(stl=res_stl, gam=res_gam, x=seq_along(res_stl))
+
+ggplot(df_res) + 
+  geom_line(aes(y=stl, x=x), col="STL Resid.") + 
+  geom_line(aes(y=gam, x=x),col="GAM Resid.") +
+  scale_colour_manual("", 
+                      breaks = c("STL Resid.", "GAM Resid."),
+                      values = c("STL Resid."="blue", "GAM Resid."="red"))
+
+```
+
+## Change point detection
+
+Consider a moving window of 30 days. Plot the mean, median and variance of the deseasoned data and check where mean/median differences and variance changes.
+
+Consider change-point analysis where a point or multiple points are detected such that the mean and/or variance of the data before and after the point is significantly different. From the R changepoint package;
+* binary segmentation - find 1st change point, split series on cp and repeat (approximate because the cp's depend on the 1st cp)
+* segment neighbourhood - uses dynamic programming (exact)
+* PELT - similar to SN but prunes along the way, assumes cp increases linearly with series i.e. changepoints are spread throughout rather than in one portion - problem?1
+
+From the R package 'changepoint', changes in mean and variance are detected separately. Presumably a change in instrument could affect the variance only or a change in location could affect the mean only. The tests below are performed on the Mossel Bay DEA *in situ* data with the seasonal signal removed. No trend is removed as the trend itself may be an indicator of instrument change.
+
+Change in the mean has multiple 
+
+# Possible validation of difference among datasets
+
+Due to the large differences in the Mossel Bay records that result from two methods of data collection, it may be necessary to validate them with respect to environmental conditions (i.e. predominant wind-driven DEA and air temperature-driven SAWS). However, this may be more inline with a publication that can be referred to in the metadata. As an example, I have begun to look at the relationship between differences and wind (figs 10-12). This is as far as I am going to take this for now. Note the differences in the monthly trends and seasonal spikes evident in only one dataset.
+
+As an initial example, consider the sudden increase in southerly wind after midday (fig. 9). If SAWS data is only being collected during the morning of each day and the DEA data is collecting throughout the day it can be expected that the affect of the wind stress on the surface water temperature is not being captured by SAWS data.
+
+&nbsp;
+&nbsp;
+
+Mossel Bay Wind Vectors
+
+&nbsp;
+
+```{r, figs12, echo=FALSE, fig.width=8, fig.height=3, warning=FALSE, message=FALSE, fig.cap="Boxplots of seasonal U and V wind vectors by time"}
+dataMB_wind <- read.csv("~/R/Docs/MosselBay_wind.csv")
+dataMB_wind$seas <- factor(dataMB_wind$seas,
+                           levels=c("summer","autumn","winter","spring"))
+
+p1 <-  ggplot(aes(y = Uwnd, x = seas, fill = time), data = dataMB_wind) +
+  geom_boxplot() + ggtitle("Mossel Bay U Speed")
+p2 <- ggplot(aes(y = Vwnd, x = seas, fill = time), data = dataMB_wind) +
+  geom_boxplot() + ggtitle("Mossel Bay V Speed")
+grid.arrange(p1, p2, ncol=2)
+```
+
+&nbsp;
+
+```{r, figs13, echo=FALSE, fig.width=5, fig.height=8, warning=FALSE, message=FALSE, fig.cap="Yearly mean and sd of the SAWS and DEA temperature data. Vertical colour lines are for visual comparison among graphs."}
+library(dplyr)
+stat_DEA <- dataMB_day_DEA %>% group_by(month,year) %>% summarise(mean = mean(temp, na.rm=T), sd = sd(temp, na.rm=T))
+stat_DEA$year <- as.Date(paste0(stat_DEA$year,"-01-01"), format="%Y-%m-%d")
+stat_SAWS <- dataMB_day_DEA %>% group_by(month,year) %>% summarise(mean = mean(SAWS, na.rm=T), sd = sd(SAWS, na.rm=T))
+stat_SAWS$year <- as.Date(paste0(stat_SAWS$year,"-01-01"), format="%Y-%m-%d")
+
+xint <- data.frame(year=unique(stat_DEA$year))
+xint <- data.frame(year=xint[seq(2,nrow(xint),2),])
+xint$grp <- rep_len(1:3, length.out = nrow(xint))
+
+group.colors <- c("red","green","yellow")
+
+p1 <- ggplot(data = stat_DEA, aes(y=mean, x=year, group=month)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd), size=.2) +
+  geom_vline(data=xint, aes(xintercept = year, color=factor(grp)), size=.4, show.legend = F) +
+  facet_grid(month ~ ., margins = FALSE, scales = "free") +
+  ggtitle("Mossel Bay DEA Temp.") +
+  #scale_fill_discrete(guide=FALSE) +
+  scale_x_date(date_labels = "%Y", date_breaks = "2 year") +
+  scale_color_manual(values=group.colors) +
+  theme(axis.text.x = element_text(angle = 45))
+
+p2 <- ggplot(data = stat_SAWS, aes(y=mean, x=year, group=month)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd), size=.2) +
+  geom_vline(data=xint, aes(xintercept = year, color=factor(grp)), size=.4, show.legend = F) +
+  facet_grid(month ~ ., margins = FALSE, scales = "free") +
+  ggtitle("Mossel Bay SAWS Temp.") +
+  #scale_fill_discrete(guide=FALSE) +
+  scale_x_date(date_labels = "%Y", date_breaks = "2 year") +
+  scale_color_manual(values=group.colors) +
+  theme(axis.text.x = element_text(angle = 45))
+
+grid.arrange(p1,p2,ncol=2)
+```
+
+
+```{r, figs14, echo=FALSE, fig.width=5, fig.height=8, fig.cap="Yearly mean and sd of the U and V wind vectors"}
+# include wind data from dataMB_wind
+tempUwind <- dataMB_wind$Uwnd[match(dataMB_day_DEA$date, as.Date(dataMB_wind$datetime))]
+tempVwind <- dataMB_wind$Vwnd[match(dataMB_day_DEA$date, as.Date(dataMB_wind$datetime))]
+dataMB_day_DEA$Uwnd <- tempUwind
+dataMB_day_DEA$Vwnd <- tempVwind
+rm(tempUwind, tempVwind)
+
+stat_Uwind <- dataMB_day_DEA %>% group_by(month,year) %>% summarise(mean = mean(Uwnd, na.rm=T),sd = sd(Uwnd, na.rm=T))
+stat_Uwind$year <- as.Date(paste0(stat_Uwind$year,"-01-01"), format="%Y-%m-%d")
+
+stat_Vwind <- dataMB_day_DEA %>% group_by(month,year) %>% summarise(mean = mean(Vwnd, na.rm=T), sd = sd(Vwnd, na.rm=T))
+stat_Vwind$year <- as.Date(paste0(stat_Vwind$year,"-01-01"), format="%Y-%m-%d")
+
+xint <- data.frame(year=unique(stat_Uwind$year))
+xint <- data.frame(year=xint[seq(2,nrow(xint),2),])
+xint$grp <- rep_len(1:3, length.out = nrow(xint))
+
+p1 <- ggplot(data = stat_Uwind, aes(y=mean, x=year, group=month)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd), size=.2) +
+  geom_hline(aes(yintercept = 0), color="red", size=.5) +
+  geom_vline(data=xint, aes(xintercept = year, color=factor(grp)), size=.3, show.legend = F) +
+  facet_grid(month ~ ., margins = FALSE, scales = "free") +
+  ggtitle("Mossel Bay Uwind.") +
+  #scale_fill_discrete(guide=FALSE) +
+  scale_x_date(date_labels = "%Y", date_breaks = "2 year") +
+  scale_color_manual(values=group.colors) +
+  theme(axis.text.x = element_text(angle = 45))
+
+p2 <- ggplot(data = stat_Vwind, aes(y=mean, x=year, group=month)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd), size=.2) +
+  geom_hline(aes(yintercept = 0), color="red", size=.5) +
+  geom_vline(data=xint, aes(xintercept = year, color=factor(grp)), size=.3, show.legend = F) +
+  facet_grid(month ~ ., margins = FALSE, scales = "free") +
+  ggtitle("Mossel Bay Vwind.") +
+  scale_fill_discrete(guide=FALSE) +
+  scale_x_date(date_labels = "%Y", date_breaks = "2 year") +
+  scale_color_manual(values=group.colors) +
+  theme(axis.text.x = element_text(angle = 45))
+
+grid.arrange(p1,p2,ncol=2)
+```
+
+
+```{r, figs15, echo=FALSE, warning=FALSE, message=FALSE, fig.width=3, fig.height=8, fig.cap="Yearly mean and sd of the temperature differences"}
+stat_Diff <- dataMB_day_DEA %>% group_by(month,year) %>% summarise(mean = mean(diff, na.rm=T), sd = sd(diff, na.rm=T))
+stat_Diff$year <- as.Date(paste0(stat_Diff$year,"-01-01"), format="%Y-%m-%d")
+
+xint <- data.frame(year=unique(stat_Diff$year))
+xint <- data.frame(year=xint[seq(2,nrow(xint),2),])
+xint$grp <- rep_len(1:3, length.out = nrow(xint))
+
+ggplot(data = stat_Diff, aes(y=mean, x=year, group=month)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd), size=.2) +
+  geom_hline(aes(yintercept = 0), color="red", size=.5) +
+  geom_vline(data=xint, aes(xintercept = year, color=factor(grp)), size=.3, show.legend = F) +
+  facet_grid(month ~ ., margins = FALSE, scales = "free") +
+  ggtitle("Mossel Bay SAWS-DEA.") +
+  #scale_fill_discrete(guide=FALSE) +
+  scale_x_date(date_labels = "%Y", date_breaks = "2 year") +
+  scale_color_manual(values=group.colors) +
+  theme(axis.text.x = element_text(angle = 45))
+```
+
+

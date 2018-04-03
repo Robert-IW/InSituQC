@@ -1,0 +1,415 @@
+---
+title: "Notes-MultiVarAnom"
+author: "Robert Williamson"
+date: "18 January 2018"
+output:
+  pdf_document: default
+  html_document: default
+---
+<style type="text/css">
+
+h1.title {
+  font-size: 30px;
+  color: DarkRed;
+}
+h1 { /* Header 1 */
+  font-size: 20px;
+  color: DarkBlue;
+}
+h2 { /* Header 2 */
+    font-size: 18px;
+  color: DarkBlue;
+}
+h3 { /* Header 3 */
+  font-size: 16px;
+  color: DarkBlue;
+}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Temporal Multivariate Anomaly Detection
+
+* global anomalies - the entire time series is used
+* local anomalies - a subset neighbourhood is used; either a window-based or seasonal-based neighbourhood
+* contextual anomalies - an anomaly in the context of time (e.g. low temperature in summer *vs* low temperature in winter)
+* collective anomalies - a data instance may not be anomalous but a series of instances may be considered anomalous (e.g. a series of high temperatures)
+
+## Methods
+
+Mahalanobis distance depends on a linear relationship among variables
+
+ARIMA models
+* Should we expect autocorrelation in the residuals as we expect anomalous events to last more than a single day
+* the time series needs to be weakly stationary: constant mean, variance and autocorrelation
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8}
+require(ggplot2)
+require(lubridate)
+
+load("~/R/Docs/stat_match.Rdata")
+stat_match$year <- as.numeric(format(as.Date(stat_match$year), "%Y"))
+nyear <- length(unique(stat_match$year))
+cc <- scales::seq_gradient_pal("darkgreen","gold","Lab")(seq(0,1,length.out=nyear))
+
+gd <- stat_match %>% 
+        group_by(month) %>% 
+        summarise(median = mean(median))
+
+ggplot(data=stat_match, aes(y=median, x=month, col=as.factor(year))) + 
+  geom_line(lwd=2, alpha=0.5) + 
+  geom_point(pch=19, size=2) +
+  geom_line(data=gd, size=1.8, col="red") +
+  scale_colour_manual(name="Year",values=cc) +
+  scale_x_continuous(breaks = 1:12, labels = month.abb[1:12]) +
+  ggtitle("Mossel Bay Median SST")
+
+ggplot(data = stat_match, aes(y=meanSST, x=year, group=month)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(aes(ymin=meanSST-sdSST, ymax=meanSST+sdSST),width=.2) +
+  facet_grid(month ~ ., margins = FALSE, scales = "free") +
+  ggtitle("Mossel Bay SST.") +
+  scale_fill_discrete(guide=FALSE) +
+  scale_x_date(date_labels = "%Y", date_breaks = "2 year") +
+  theme(axis.text.x = element_text(angle = 45))
+```
+
+&nbsp;
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8}
+load("~/R/Docs/stat_Uwind.Rdata")
+stat_Uwind$year <- as.numeric(format(as.Date(stat_Uwind$year),"%Y"))
+nyear <- length(unique(stat_Uwind$year))
+cc <- scales::seq_gradient_pal("darkgreen","gold","Lab")(seq(0,1,length.out=nyear))
+
+gd <- stat_Uwind %>% 
+        group_by(month) %>% 
+        summarise(median = mean(median))
+
+ggplot(data=stat_Uwind, aes(y=median, x=month, col=as.factor(year))) + 
+  geom_line(lwd=2, alpha=0.5) + 
+  geom_point(pch=19, size=2) +
+  geom_line(data=gd, size=1.8, col="red") +
+  scale_colour_manual(name="Year",values=cc) +
+  scale_x_continuous(breaks = 1:12, labels = month.abb[1:12]) +
+  geom_hline(aes(yintercept = 0), color="red", size=.5) +
+  ggtitle("Mossel Bay Median Uwind")
+
+ggplot(data = stat_Uwind, aes(y=mean, x=year, group=month)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd),width=.2) +
+  geom_hline(aes(yintercept = 0), color="red", size=.5) +
+  facet_grid(month ~ ., margins = FALSE, scales = "free") +
+  ggtitle("Mossel Bay Uwind.") +
+  scale_fill_discrete(guide=FALSE) +
+  scale_x_date(date_labels = "%Y", date_breaks = "2 year") +
+  theme(axis.text.x = element_text(angle = 45))
+```
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8}
+ggplot(data = stat_match, aes(y=meanUcum, x=year, group=month)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(aes(ymin=meanUcum-sdUcum, ymax=meanUcum+sdUcum),width=.2) +
+  geom_hline(aes(yintercept = 0), color="red", size=.5) +
+  facet_grid(month ~ ., margins = FALSE, scales = "free") +
+  ggtitle("Mossel Bay Cum. U Uwind.") +
+  scale_fill_discrete(guide=FALSE) +
+  scale_x_date(date_labels = "%Y", date_breaks = "2 year") +
+  theme(axis.text.x = element_text(angle = 45))
+```
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8}
+ggplot(data = stat_match, aes(y=meanUacum, x=year, group=month)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(aes(ymin=meanUacum-sdUacum, ymax=meanUacum+sdUacum),width=.2) +
+  facet_grid(month ~ ., margins = FALSE, scales = "free") +
+  ggtitle("Mossel Bay Abs. Cum. Uwind") +
+  scale_fill_discrete(guide=FALSE) +
+  scale_x_date(date_labels = "%Y", date_breaks = "2 year") +
+  theme(axis.text.x = element_text(angle = 45))
+```
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8}
+load("~/R/Docs/stat_Vwind.Rdata")
+stat_Vwind$year <- as.numeric(format(as.Date(stat_Vwind$year),"%Y"))
+nyear <- length(unique(stat_Vwind$year))
+cc <- scales::seq_gradient_pal("darkgreen","gold","Lab")(seq(0,1,length.out=nyear))
+
+gd <- stat_Vwind %>% 
+        group_by(month) %>% 
+        summarise(median = mean(median))
+
+ggplot(data=stat_Vwind, aes(y=median, x=month, col=as.factor(year))) + 
+  geom_line(lwd=2, alpha=0.5) + 
+  geom_point(pch=19, size=2) +
+  geom_line(data=gd, size=1.8, col="red") +
+  scale_colour_manual(name="Year",values=cc) +
+  scale_x_continuous(breaks = 1:12, labels = month.abb[1:12]) +
+  geom_hline(aes(yintercept = 0), color="red", size=.5) +
+  ggtitle("Mossel Bay Median Vwind")
+
+ggplot(data = stat_Vwind, aes(y=mean, x=year, group=month)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd),width=.2) +
+  geom_hline(aes(yintercept = 0), color="red", size=.5) +
+  facet_grid(month ~ ., margins = FALSE, scales = "free") +
+  ggtitle("Mossel Bay Vwind.") +
+  scale_fill_discrete(guide=FALSE) +
+  scale_x_date(date_labels = "%Y", date_breaks = "2 year") +
+  theme(axis.text.x = element_text(angle = 45))
+```
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8}
+ggplot(data = stat_match, aes(y=meanVcum, x=year, group=month)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(aes(ymin=meanVcum-sdVcum, ymax=meanVcum+sdVcum),width=.2) +
+  geom_hline(aes(yintercept = 0), color="red", size=.5) +
+  facet_grid(month ~ ., margins = FALSE, scales = "free") +
+  ggtitle("Mossel Bay Cum. Vwind.") +
+  scale_fill_discrete(guide=FALSE) +
+  scale_x_date(date_labels = "%Y", date_breaks = "2 year") +
+  theme(axis.text.x = element_text(angle = 45))
+```
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8}
+ggplot(data = stat_match, aes(y=meanVacum, x=year, group=month)) +
+  geom_line() +
+  geom_point() +
+  geom_errorbar(aes(ymin=meanVacum-sdVacum, ymax=meanVacum+sdVacum),width=.2) +
+  facet_grid(month ~ ., margins = FALSE, scales = "free") +
+  ggtitle("Mossel Bay Abs. Cum. Vwind.") +
+  scale_fill_discrete(guide=FALSE) +
+  scale_x_date(date_labels = "%Y", date_breaks = "2 year") +
+  theme(axis.text.x = element_text(angle = 45))
+```
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8}
+load("~/R/Docs/stat_Wind.Rdata")
+stat_Wind$year <- as.numeric(format(as.Date(stat_Wind$year),"%Y"))
+nyear <- length(unique(stat_Wind$year))
+cc <- scales::seq_gradient_pal("darkgreen","gold","Lab")(seq(0,1,length.out=nyear))
+
+gd <- stat_Wind %>% 
+        group_by(month) %>% 
+        summarise(median = mean(median))
+
+ggplot(data=stat_Wind, aes(y=median, x=month, col=as.factor(year))) + 
+  geom_line(lwd=2, alpha=0.5) + 
+  geom_point(pch=19, size=2) +
+  geom_line(data=gd, size=1.8, col="red") +
+  scale_colour_manual(name="Year",values=cc) +
+  scale_x_continuous(breaks = 1:12, labels = month.abb[1:12]) +
+  ggtitle("Mossel Bay Median Wind Spd")
+
+```
+ 
+## Application of Change Point Detection on Parametric and Non-Paramentric Data
+
+### Normalizing non parametric data
+
+Does extracting the seasonal cycle(s) depend on multiple seasonality? For example, does the wind data exhibit a quasi-weekly as well as annual cycle? Fourier Transform with the TSA package and 'periodogram' function.
+
+require("TSA"")
+p = periodogram(ts)
+dd = data.frame(freq=p$freq, spec=p$spec)
+order = dd[order(-dd$spec),]
+top = head(order, 3)                        # get the top 3 power frequencies
+time = 1/top$freq
+time
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8, fig.cap="SST Distribution"}
+require(fitdistrplus)
+# create ts object
+load("~/R/Docs/dataSST.Rdata")
+doy <- format(dataSST$date[1], "%j")
+yr <- format(dataSST$date[1], "%Y")
+ts_sst <- ts(dataSST$sst, frequency=365, start = c(as.numeric(yr),as.numeric(doy)))
+
+fit.norm <- fitdist(dataSST$sst, "norm")        # not normality, bimodal
+plot(fit.norm, breaks=20)
+```
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8, fig.cap="U Wind Distribution"}
+load("~/R/Docs/dataWind.Rdata")
+fit.norm <- fitdist(dataWind$uwind, "norm")     # assume normality
+plot(fit.norm, breaks=20)
+```
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8, fig.cap="V Wind Distribution"}
+fit.norm <- fitdist(dataWind$vwind, "norm")     # assume normality
+plot(fit.norm, breaks=20)
+```
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8, fig.cap="Wind Speed Distribution"}
+fit.norm <- fitdist(dataWind$spd, "norm")       # not normal
+plot(fit.norm, breaks=20)
+
+```
+
+
+Althought the 'U' and 'V Wind' appear near-normal the 'SST' data is bimodal and the 'Wind Speed' data appears to have a Weibull distribution. Below I condsider the distributions of the residuals using the 'stlplus' package.
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8, fig.cap="SST Residual Distribution"}
+require(stlplus)
+# create ts object
+doy <- format(dataSST$date[1], "%j")
+yr <- format(dataSST$date[1], "%Y")
+ts_sst <- ts(dataSST$sst, frequency=365, start = c(as.numeric(yr),as.numeric(doy)))
+
+doy <- format(dataWind$date[1], "%j")
+yr <- format(dataWind$date[1], "%Y")
+ts_uwind <- ts(dataWind$uwind, frequency=365*4, start = c(as.numeric(yr),as.numeric(doy)))
+ts_vwind <- ts(dataWind$vwind, frequency=365*4, start = c(as.numeric(yr),as.numeric(doy)))
+ts_spd <- ts(dataWind$spd, frequency=365*4, start = c(as.numeric(yr),as.numeric(doy)))
+
+decmp_sst <- stlplus(ts_sst, s.window="periodic")[[1]]
+decmp_uwind <- stlplus(ts_uwind, s.window="periodic")[[1]]
+decmp_vwind <- stlplus(ts_vwind, s.window="periodic")[[1]]
+decmp_spd <- stlplus(ts_spd, s.window="periodic")[[1]]
+
+fit.norm <- fitdist(decmp_sst$remainder, "norm")       # normal
+plot(fit.norm, breaks=20)
+norm_sst <- decmp_sst$remainder
+#plot(stlplus(ts_sst, s.window="periodic"),main="SST Decomp")
+```
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8, fig.cap="U Wind Residual Distribution"}
+fit.norm <- fitdist(decmp_uwind$remainder, "norm")       # normal
+plot(fit.norm, breaks=20)
+norm_uwind <- decmp_uwind$remainder
+```
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8, fig.cap="V Wind Residual Distribution"}
+fit.norm <- fitdist(decmp_vwind$remainder, "norm")       # normal
+plot(fit.norm, breaks=20)
+norm_vwind <- decmp_vwind$remainder
+```
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8, fig.cap="Wind Speed Residual Distribution"}
+fit.norm <- fitdist(decmp_spd$remainder, "norm")       # normal
+plot(fit.norm, breaks=20)
+```
+
+The residuals of 'Wind Speed' data does not follow a normal distribution. Here I use the 'johnson' package to transform the residuals to a normal distribution.
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8, fig.cap="Wind Speed Residual-Transformed Distribution"}
+require(Johnson)
+spd_john <- RE.Johnson(decmp_spd$remainder)
+#hist(spd_john$transformed, breaks = 25, col = rgb(0.9, 0.1, 0.1, 0.5))
+fit.norm <- fitdist(spd_john$transformed, "norm")
+plot(fit.norm, breaks=20)
+norm_spd <- spd_john$transformed
+```
+
+
+Below I attempt a simpler way of obtaining the residuals by removing the seasonal cycle fitted with a low pass filter.
+
+
+### Change point detection for normal distributions
+
+# Spatio-Temporal Multivariate Anomaly Detections
+
+## Flach et al., 2017. Multivariate anomaly detection for Earth observations: a comparison of algorithms and feature extraction techniques
+
+### Testing criteria
+"we focus on the existence of seasonality, correlations among variables, and non-Gaussian distributions" in synthesized 8-day interval satellite images
+
+"in our experimental setting anomalous events do occur independently of seasonality. However, depending on the research question, independence of seasonality might not always be the case"
+
+"anomalous events are introduced in the [3] independent components only and then propagated from the independent component to some of the [10] variables in the data cube [lon/lat{1:50}; time{1:300}; var{1:10}] with random weights. The anomalies are contiguous in space and time"
+
+"the challenge is to detect the propagated anomaly through the unsupervised algorithms, i.e., without using the information about the spatiotemporal location of the anomaly"
+
+**Four events artificially synthesized**
+
+* **BaseShift** -  shifts in the running mean for extreme events
+* **TrendOnset** -  onset of a trend
+* **MSCChange** - change in amplitude of seasonal cycle
+* **VarianceChange** - change in the variance
+
+"we focus on events of magnitudes typically detected in real world data i.e., deviations from the mean (extremes) larger
+than 2 SD..., a relative increase or decrease in the mean annual cycle amplitude of 25%,... or an increase in the signal variance of 25%"
+
+**Feature extraction methods tested**
+
+* **sMSC** - subtract median seasonal cycle
+* **mwVAR** - moving window variance
+* **TDR** - time delay embedding
+* **PCA** - principal component analysis
+* **ICA** - independent component analysis (nonlinear PCA)
+* **EWMA** - exponential weighted moving average
+
+**Anomaly detection algorithms tested**
+
+* **UNIV** - univariate determination (above/below quantiles)
+* **T2** - Hotelling's T^2^
+* **KNN** - k-nearest neighbours
+* **REC** - recurrances
+* **KDE** - kernal density estimation
+* **SVDD** - support vector data description
+* **KNFST** - kernel null Foley-Sammon transfer
+
+### Results
+**Feature extraction techniques**
+
+For extreme events;
+
+* "choosing a suitable feature extraction technique largely depends on the event type of interest"
+* "dimensionality reduction (via **PCA** or **ICA**) is a crucial feature extraction technique step as it derives meaningful uncorrelated subsets of the data"
+* "**EWMA** can improve the detection rate for spe-cial cases, i.e., long events (LongExtremes) and high signal-to-noise ratios (NoiseIncrease)"
+
+For trend onset;
+
+* "temporal smoothing with **EWMA** has a stronger positive effect than for BaseShift"
+* "specialized algorithms may perform better for this particular class of anomaly"
+
+For change in the seasonal amplitude;
+
+* "subtract the median seasonal cycle before applying the detection algorithm (**sMSC**)"
+* "temporal smoothing in combination with dimensionality reduction improves detection by a large margin (**PCA_sMSC_EWMA**)"
+* "accounting for temporal dynamics with a TDE is even more suitable (**TDE_PCA_sMSC_EWMA**)"
+
+For change in variance;
+
+"the algorithms used are hardly able to detect any decrease in variance"
+
+**Anomaly detection algorithms**
+
+**KDE** and **REC** "techniques exhibit overall the highest AUC [measure of skill] and lowest RVP []
+
+"we observe even superior performance of **KNN-Gamma** compared to **KDE** and **REC** for difficult data properties (e.g., MoreIndepComponents,CorrelatedNoise)"
+
+"**KNFST** and **SVDD** these techniques perform on average worse than or equally as well as **UNIV**
+
+"**T2** exhibits good performance for detecting starting trend and shifts in the mean"
+
+**Ensembles**
+
+"we select the four best algorithms (KDE, REC, KNN-Gamma, T 2)... and the three best distance-based algorithms (KDE, REC, KNN-Gamma)... for computing their ensembles"
+
+"ensemble building improves the anomaly detection rate. The mean AUC of each of the ensemble members is lower than the AUC of the ensemble"
+
+### Conclusion
+"three multivariate anomaly detec-tion algorithms (**KDE**, **REC**, **KNN-Gamma**) outperform univariate extreme event detection"
+
+"we find that the feature extraction has to be explicitly designed for the event type of interest, i.e., time delay embedding (for detecting changes in the cycle amplitude) and exponential weighted moving average (for detecting trends and long ex-tremes and removing uncorrelated noise in the signal)"
+
+"in general, if the data comprise sea-sonality, subtracting them and using the remaining time se-ries as the input feature is essential"
+
+"we im-prove the detection rate of multivariate anomalies in highly correlated data streams by adding a dimensionality reduction method to the workflow (in line with results of Zimek et al., 2012)"
+
+## Additional remarks
+
+"a typical preprocessing of EOs is to center variables to zero mean and standardize to unit variance (also known as *z* transformation)"
+
+"we recommend subtracting the median seasonal cycle before standardization"
+
+"we recommend using estimates of the variance of the entire time series or correcting for the overestimation in the out-of-reference period as shown in Sippel et al. (2015)"
