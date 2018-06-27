@@ -1,14 +1,10 @@
+
+# Load libraries ----------------------------------------------------------
+
 library(tidyverse)
 library(data.table)
 library(fasttime)
 library(sp)
-
-#------------------------------------------------------------------------
-
-# normalize data columns
-normalit<-function(m){
-  (m - min(m, na.rm=T))/(max(m, na.rm=T)-min(m, na.rm=T))
-}
 
 
 # Load and prep the data --------------------------------------------------
@@ -20,17 +16,25 @@ SACTN <- SACTN_daily_v4.2 %>%
 
 load("setup/site_list_v4.2_sans_QC.RData")
 site_coords <- site_list %>%
-  select(lon, lat, index)
+  dplyr::select(lon, lat, index)
 
 ## OISST
-OISST <- fread("data/SA-avhrr-only-v2.19810901-20171231.csv")
-colnames(OISST) <- c("lon", "lat", "temp", "date")
-OISST <- OISST %>% 
-  # mutate(month = lubridate::month(date)) #%>% 
-  mutate(month = format(as.Date(fastPOSIXct(date)), "%m"))
+# OISST <- fread("data/SA-avhrr-only-v2.19810901-20171231.csv")
+# colnames(OISST) <- c("lon", "lat", "temp", "date")
+# OISST <- OISST %>% 
+#   # mutate(month = lubridate::month(date)) #%>% 
+#   mutate(month = format(as.Date(fastPOSIXct(date)), "%m"))
+load("data/OISSt_inbound.RData")
 
 ## Mask
 load("data/200nm_mask.RData")
+
+
+# Normalisation function --------------------------------------------------
+
+normalit<-function(m){
+  (m - min(m, na.rm=T))/(max(m, na.rm=T)-min(m, na.rm=T))
+}
 
 
 # Insitu clustering function ----------------------------------------------
@@ -56,7 +60,7 @@ is_k_means <- function(df){
     mutate_all(funs(normalit)) %>% 
     mutate(cluster = kmeans(., 6, nstart=100)$cluster,
            index = df.data.kmeans$index)%>% 
-    left_join(site_coords)
+    left_join(site_coords, by = "index")
   
   return(df.data.kmeans.nor)
 }
@@ -64,7 +68,7 @@ is_k_means <- function(df){
 
 # SST clustering function -------------------------------------------------
 
-# df <- OISST
+# df <- OISST_inbound
 sst_k_means <- function(df){
   df.data <- data.table(df)[,.(mean = mean(temp, na.rm=T),
                                # med = median(temp, na.rm=T),
@@ -95,13 +99,17 @@ sst_k_means <- function(df){
 
 SACTN_cluster <- is_k_means(SACTN)
 
-OISST_cluster <- sst_k_means(OISST)
+OISST_cluster <- sst_k_means(OISST_inbound)
 
 ggplot(data = OISST_cluster, aes(x = lon, y = lat)) +
-  geom_raster(aes(fill = as.factor(cluster))) +
+  geom_raster(aes(fill = as.factor(cluster)), show.legend = F) +
   borders(fill = "grey70") +
-  geom_point(data = SACTN_cluster, size = 2.57, shape = 21, colour = "white",
-             aes(x = lon, y = lat, fill = as.factor(cluster))) +
-  coord_equal(expand = c(0, 0), xlim = c(15, 35), ylim = c(-27, -36)) +
-  scale_colour_viridis_d()
+  geom_point(data = SACTN_cluster, size = 2.57, shape = 16, colour = "white") +
+  geom_point(data = SACTN_cluster, size = 2.57, shape = 16, #colour = "white",
+             aes(colour = as.factor(cluster)), show.legend = F) +
+  geom_polygon(aes(group = cluster)) +
+  coord_equal(expand = 0, xlim = c(12, 37), ylim = c(-25, -38)) +
+  scale_colour_viridis_d(option = "C") +
+  scale_fill_viridis_d(option = "D")
+  
 

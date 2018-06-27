@@ -9,6 +9,7 @@ library(lubridate)
 library(stringr)
 library(raster)
 library(mgcv)
+library(fasttime)
 library(doMC); doMC::registerDoMC(cores = 4)
 
 
@@ -91,15 +92,32 @@ pf <- fortify(p)
 #   geom_path(aes(group = group)) +
 #   coord_equal(expand = c(0,0), xlim = c(12, 37), ylim = c(-25, - 39))
 
-bound <- list(list(lon = pf$long, lat = pf$lat))
+# Subset for testing
+OISST_sub <- OISST %>% 
+  filter(date == "1982-01-01")
+pf_sub <- pf %>%
+  filter(group == 1.1) %>% 
+  mutate(long = round(long, 1),
+         lat = round(lat, 1)) %>% 
+  # select(long, lat) %>% 
+  unique()
 
-inbound <- with(OISST, inSide(bound, lon, lat))
+bound <- list(list(lon = pf_sub$long, lat = pf_sub$lat))
+
+system.time(inbound <- with(OISST, inSide(bound, lon, lat))) ## xxx seconds
 
 OISST_inbound <- OISST[inbound,]
-ggplot(filter(OISST_inbound, date == "1997-07-18"), aes(x = lon, y = lat)) +
+colnames(OISST_inbound) <- c("lon", "lat", "temp", "date")
+OISST_inbound <- OISST_inbound %>% 
+  mutate(month = format(as.Date(fastPOSIXct(date)), "%m"))
+save(OISST_inbound, file = "data/OISSt_inbound.RData")
+
+ggplot(filter(OISST_inbound, date == "1998-09-07"), aes(x = lon, y = lat)) +
+# ggplot(OISST_inbound, aes(x = lon, y = lat)) +
   borders() +
   geom_raster(aes(fill = temp)) +
-  coord_equal(expand = c(0,0), xlim = c(12, 37), ylim = c(-25, - 39))
+  geom_path(data = pf_sub, aes(x = long)) +
+  coord_equal(expand = 0, xlim = c(12, 37), ylim = c(-25, - 39))
 
 
 # Read CMC SST ------------------------------------------------------------
