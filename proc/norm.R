@@ -1,7 +1,7 @@
 library(tidyverse)
 library(data.table)
 library(fasttime)
-
+library(sp)
 
 #------------------------------------------------------------------------
 
@@ -14,20 +14,23 @@ normalit<-function(m){
 # Load and prep the data --------------------------------------------------
 
 ## In situ data
-load("~/SACTNraw/data/4_products/SACTN_daily_v4.2.RData")
+load("data/SACTN_daily_v4.2_sans_QC.RData")
 SACTN <- SACTN_daily_v4.2 %>% 
   mutate(month = month(date))
 
-load("~/SACTNraw/metadata/site_list_v4.2.RData")
+load("setup/site_list_v4.2_sans_QC.RData")
 site_coords <- site_list %>%
   select(lon, lat, index)
 
 ## OISST
-OISST <- fread("~/Desktop/SA-avhrr-only-v2.19810901-20171231.csv")
+OISST <- fread("data/SA-avhrr-only-v2.19810901-20171231.csv")
 colnames(OISST) <- c("lon", "lat", "temp", "date")
 OISST <- OISST %>% 
   # mutate(month = lubridate::month(date)) #%>% 
   mutate(month = format(as.Date(fastPOSIXct(date)), "%m"))
+
+## Mask
+load("data/200nm_mask.RData")
 
 
 # Insitu clustering function ----------------------------------------------
