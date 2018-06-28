@@ -11,7 +11,7 @@ library(rgdal)
 
 
 # setup bathymetry map
-bathy <- raster("/home/robert/R/x86_64-pc-linux-gnu-library/3.3/bathy-GEBCO/gebco-southernAfrica_1min.nc")
+bathy <- raster("setup/gebco-southernAfrica_1min.nc")
 locbb <- matrix(c(9,-40,41,-20),nrow=2,ncol=2)
 x <- extent(locbb)
 bathy.cont <- crop(bathy,x)
@@ -32,6 +32,18 @@ bathy.mask.temp <- mask(bathy.buf,bathy.land)       # remove the inland buffer d
 
 p <- rasterToPolygons(bathy.mask.temp, dissolve=T)
 
-setwd("~/Desktop/")
-save(p, file = "~/Desktop/200nm_mask.RData")
+save(p, file = "data/200nm_mask.RData")
 
+
+# Find bbox ---------------------------------------------------------------
+
+plot(p)
+pf <- fortify(p)
+
+ggplot(pf, aes(x = long, y = lat)) +
+  borders() +
+  geom_polygon(aes(group = group)) +
+  coord_equal(expand = c(0,0), xlim = c(12, 37), ylim = c(-25, - 39))
+
+mask_bbox <- data.frame(lon = c(12, 37),
+                        lat = c(-25, - 39))
