@@ -250,7 +250,7 @@ seas <- list(c("12","01","02"),c("03","04","05"),c("06","07","08"),c("09","10","
 dataMB_day_DEAsub <- lapply(seas, function(x) subset(SACTNdaily_v4.1, site=="Mossel Bay" & src=="DEA" & substr(date, 6,7) %in% x))
 dataMB_day_SAWSsub <- lapply(seas, function(x) subset(SACTNdaily_v4.1, site=="Mossel Bay" & src=="SAWS" & substr(date, 6,7) %in% x))
 
-p1 <- lapply(dataMB_day_DEAsub, function(x) qplot(x$temp, geom = "histogram", binwidth=0.2, xlab="Tenperature",main="DEA", xlim=c(10,25), asp=1))
+p1 <- lapply(dataMB_day_DEAsub, function(x) qplot(x$temp, geom = "histogram", binwidth=0.2, xlab="Temperature",main="DEA", xlim=c(10,25), asp=1))
 p2 <- lapply(dataMB_day_SAWSsub, function(x) qplot(x$temp, geom = "histogram", binwidth=0.5, xlab = "Temperature", main="SAWS",xlim=c(10,25),asp=1))
 
 do.call(grid.arrange,c(p1, ncol=4))
