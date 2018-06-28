@@ -19,7 +19,7 @@ bathy.loc <- crop(bathy,x)      # crop bathy map
 bathy.land <- crop(bathy,x)
 rm(bathy,locbb,x)
 
-borders <- readShapePoly("SAfrica-coast.shp")
+borders <- readShapePoly("~/R/myFunctions/SAfrica-coast.shp")
 borders <- SpatialPolygons(borders@polygons)
 minlat <- -40;minlon <- 9;maxlat <- -20;maxlon <- 41
 
