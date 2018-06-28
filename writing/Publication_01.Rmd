@@ -1,0 +1,43 @@
+---
+  title: "Publication of In Situ Data"
+author: "Robert Williamson, AJ Smit, Robert Schlegel, Amieroh Abrahams"
+date: "26 June 2018"
+fontsize: 12pt
+output:
+  rmarkdown::pdf_document:
+  fig_caption: yes        
+includes:  
+  in_header: preamble.tex
+html_document: default
+word_document: default
+---
+  <style type="text/css">
+  
+  h1.title {
+    font-size: 30px;
+    color: DarkRed;
+  }
+h1 { /* Header 1 */
+    font-size: 20px;
+  color: DarkBlue;
+}
+h2 { /* Header 2 */
+    font-size: 18px;
+  color: DarkBlue;
+}
+h3 { /* Header 3 */
+    font-size: 16px;
+  color: DarkBlue;
+}
+</style>
+  
+  ```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Aim and Objectives ##
+
+
+## Methods ##
+
+
+## Figures ##

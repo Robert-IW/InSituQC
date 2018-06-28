@@ -727,6 +727,315 @@ grid.arrange(p1, arrangeGrob(p2, p3, ncol = 2), nrow = 2)
 
 # Analysis of change in variance and mean - Mossel Bay
 
+## Decomposition of Time Series data using STL, AR(I)MA and GAMM
+
+### Simplest approach
+
+The simplest method of obtaining a seasonal signals is to group the data by day-of-year and obtain a daily mean value. This can then be smoothed to create a more 'expected' signal.
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8, fig.cap="Simple seasonality"}
+library(dplyr)
+# to plot
+df.data <- data.frame("temp"=dataMB_day_DEA$temp,
+                      "doy"=as.numeric(format(dataMB_day_DEA$date, "%j")),
+                      "year"=format(dataMB_day_DEA$date, "%Y"),
+                      stringsAsFactors = F)
+
+df.data.spread <- df.data %>%
+  spread(year, temp)
+
+df.data.spread$med <- apply(df.data.spread[,2:18],  1, function(x) median(x, na.rm=T))
+df.data.spread$sd <- apply(df.data.spread[,2:18],  1, function(x) sd(x, na.rm=T))
+
+df.data$seas.med <- NA
+df.data$seas.sd <- NA
+
+# asign the seasonal data to day of the year
+for (i in 1:366){
+  idx <- which(df.data$doy==i)
+  df.data$seas.med[idx] <- df.data.spread$med[i]
+  df.data$seas.sd[idx] <- df.data.spread$sd[i]
+}
+
+p1 <- ggplot(data = df.data, aes(y=Temp, x=DOY)) +
+  geom_point() +
+  stat_summary(aes(group=1), fun.y=mean, geom="line", colour="red", lwd=3) +
+  stat_summary(aes(group=1), fun.y=median, geom="line", colour="blue", lwd=3)
+  #scale_x_continuous(labels=month.abb)
+
+p2 <- ggplot() +
+  stat_summary(data = df.data, aes(y=Temp, x=DOY, group=1), fun.y=sd, geom="line")
+
+grid.arrange(p1,p2,nrow=2)
+
+# restructure data frame to determine mean and sd vectors
+
+```
+
+
+### Seasonal Adjustment by Differencing or Modeling
+
+We can subtract the daily minimum temperature from the same day last year to correct for seasonality. This would require special handling of February 29th in leap years and would mean that the first year of data would not be available for modeling. To be robust against daily fluctuations, it will be more stable to subtract the monthly mean of the previous year from the present day value.
+
+An alternative approach is to subtract the modeled seasonal cycle from the observations. A simple approach is to fit an nth order (4 or 5) polynomial to a single year data or all data (where x is day-of-the-year). 
+
+### Seasonal First Difference
+
+First difference of the observation date and the previous year average week before and week after.
+
+### STL
+
+Seasonal and Trend decomposition using Loess has several advantages over the recommended X-12 ARIMA advocated by the Canandian:
+
+* Unlike X-12-ARIMA, STL will handle any type of seasonality, not only monthly and quarterly data.
+
+* The seasonal component is allowed to change over time, and the rate of change can be controlled by the user.
+
+* The smoothness of the trend-cycle can also be controlled by the user.
+
+* It can be robust to outliers (i.e., the user can specify a robust decomposition). So occasional unusual observations will not affect the estimates of the trend-cycle and seasonal components. They will, however, affect the remainder component.
+
+However, it is only able to handle additive models. The additive model is most appropriate if the magnitude of the seasonal fluctuations or the variation around the trend-cycle does not vary with the level of the time series. An alternative to using a multiplicative model, is to first transform the data until the variation in the series appears to be stable over time, and then use an additive model.
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8, fig.cap="Mossel Bay DEA Temperature Distribution"}
+require(stlplus)
+require(forecast)
+
+doy <- format(dataMB_day_DEA$date[1], "%j")
+yr <- format(dataMB_day_DEA$date[1], "%Y") 
+
+data <- ts(dataMB_day_DEA$temp, frequency=365, start = c(as.numeric(yr),
+                                                           as.numeric(doy)))
+
+# fit the STL to raw data
+# s.window is the smoothing parameter for the season and based on a each year
+s.win.value <- length(unique(dataMB_day_DEA$year))
+fit.raw <- stlplus(data, s.window=s.win.value, s.degree = 1, t.window=1460, n.p = 365)
+# s.window is the smoothing parameter for the season and based on a single year
+fit.raw.rigid <- stlplus(data, s.window="periodic", t.window = 1460, n.p=365)
+
+plot(as.numeric(data), col="gray", type="l", lwd=3)
+lines(fit.raw$data$seasonal+fit.raw$data$trend, col="darkorange", lwd=3)
+lines(fit.raw.rigid$data$seasonal+fit.raw.rigid$data$trend, col="blue", lwd=3)
+lines(fit.raw$data$trend, col="darkorange", lwd=3, lty=2)
+lines(fit.raw.rigid$data$trend, col="blue", lwd=3, lty=2)
+legend("top", c("Raw Data","Flexi","Rigid"), lty=1, lwd=2, xpd=TRUE, horiz=TRUE, inset=c(-.2,-.2), bty = "n", col=c("gray","darkorange","blue"), cex=1)
+
+# interp missing data and fit STL to smoothed data
+data.nona <- na.interp(data)
+
+plot(data.nona, type="l", col="darkorange", lwd=3)
+lines(data, col="gray", lwd=3)
+legend("top", c("Raw Data", "Interpreted"), lty=1, lwd=2, xpd=TRUE, horiz=TRUE, inset=c(-.2,-.2), bty = "n", col=c("gray","darkorange"), cex=1)
+
+# smooth the data using WMA
+window_make <- function(len){
+  window_point <- c(seq((len+1)/2,2,-1),1,seq(2,(len+1)/2,1))
+  return(window_point)
+}
+
+window_size <- 31                         # total window length in days
+window_point <- window_make(window_size)  # time points before and after t
+
+# weights <- 2/((window_point)+1)          # exponential weights
+# weights <- 0 + (max(window_point)-(window_point-1))/
+#  max(window_point)                      # linear weights
+weights <- window_point/window_point     # equal weights
+
+data.smoo <- stats::filter(data.nona, weights/sum(weights), method="convolution", sides=2)
+plot(data.smoo, type="l")
+
+# smooth the data using SPLINE
+data.spline <- smooth.spline(data.nona, spar=0.3)
+data.spline <- ts(data.spline$y, frequency=365, start = c(as.numeric(yr),
+                                                           as.numeric(doy)))
+
+# smooth the data using LOESS smoother
+y <- data.nona
+x <- seq(1,length(y),1)
+data.loess <- loess(y~x, span=.02, family="symmetric")
+data.loess <- ts(data.loess$fitted, frequency=365, start = c(as.numeric(yr),
+                                                           as.numeric(doy)))
+
+plot(data, type="l", col="darkgray", lwd=3)
+lines(data.smoo, col="blue", lwd=3)
+lines(data.spline, col="red", lwd=3)
+lines(data.loess, col="chartreuse", lwd=3)
+legend("top", c("Raw Data", "Spline", "WMA", "LOESS"), lty=1, lwd=2, xpd=TRUE, horiz=TRUE, inset=c(-.2,-.2), bty = "n", col=c("gray","red","blue","chartreuse"), cex=1)
+
+# fit STL with no restriction on smoothed data
+fit.smoo <- stlplus(data.smoo, s.window=s.win.value, s.degree = 1, t.window=1460, n.p = 365)
+fit.spline <- stlplus(data.spline, s.window=s.win.value, s.degree = 1, t.window=1460, n.p = 365)
+# LOESS on unsmoothed data
+# fit.loess <- stlplus(data.nona, s.window=s.win.value, s.degree = 1, t.window=1460, n.p = 365)
+# LOESS on smoothed data
+fit.loess <- stlplus(data.loess, s.window=s.win.value, s.degree = 1, t.window=1460, n.p = 365)
+fit.loess$data$raw_unsmoo <- as.vector(data.nona)   # include the unsmoothed data
+fit.loess$data$res_unsmoo <- fit.loess$data$raw_unsmoo-
+  fit.loess$data$seasonal-
+  fit.loess$data$trendm                             # get residuals from unsmoothed
+
+plot(fit.smoo$data$seasonal, type="l", col="blue")
+lines(fit.spline$data$seasonal, col="red")
+lines(fit.loess$data$seasonal, col="chartreuse3")
+legend("top", c("Spline", "WMA", "LOESS"), lty=1, lwd=2, xpd=TRUE, horiz=TRUE, inset=c(-.2,-.2), bty = "n", col=c("red","blue","chartreuse3"), cex=1)
+
+plot(as.numeric(data.nona), col="gray", type="l", lwd=3)
+lines(as.numeric(data.loess), col="darkorange", lwd=3)
+lines(fit.loess$data$seasonal+fit.loess$data$trend, col="chartreuse4", lwd=3)
+lines(fit.loess$data$trend, col="red", lwd=2)
+legend("top", c("Interp Data","LOESS Smooth","Seasonal","Trend"), lty=1, lwd=2, xpd=TRUE, horiz=TRUE, inset=c(-.2,-.2), bty = "n", col=c("gray","darkorange","chartreuse4","red"), cex=1)
+
+# # smooth the seasonal signal from spline with WMA
+# seas <- as.ts(fit.spline$data$seasonal)
+# window_size <- 31                         # total window length in days
+# window_point <- window_make(window_size)  # time points before and after t
+# 
+# #weights <- 2/((window_point)+1)          # exponential weights
+# #weights <- 0 + (max(window_point)-(window_point-1))/
+# #  max(window_point)                      # linear weights
+# weights <- window_point/window_point     # equal weights
+# 
+# seas.spline <- stats::filter(seas, weights/sum(weights), method="convolution", sides=2)
+# 
+# plot(data, col="gray", type="l",
+#  main="Mossel Bay DEA Temperature",
+#  ylab="Temperature", xlab="")
+# lines(fit.non$data[,3],col="red")
+# lines(fit.non$data$seasonal + fit.non$data$trend, col="blue", lwd=3)
+# lines(seas.smoo+fit.non$data$trend, col="darkorange", lwd=3)
+# lines(fitted(seas.loess)+fit.non$data$trend, col="green", lwd=3)
+# 
+# plot(data,col="red",
+#      main="Mossel Bay Trend (red) and De-Trended (blue)",
+#      ylab="Temperature", xlab="")
+# lines(fit$data[,2]+fit$data[,4]+mean(fit$data[,3]),col="blue")
+# lines(fit$data[,3],col="red")
+
+# fit STL with fixed season
+fit.regid <- stlplus(data.loess, s.window="periodic", t.window = 1460, n.p=365)
+
+plot(as.numeric(data.loess), col="gray", type="l", lwd=3)
+lines(fit.loess$data$seasonal+fit.loess$data$trend, col="darkorange", lwd=3)
+lines(fit.regid$data$seasonal+fit.regid$data$trend, col="blue", lwd=3)
+lines(fit.loess$data$trend, col="darkorange", lwd=3, lty=2)
+lines(fit.regid$data$trend, col="blue", lwd=3, lty=2)
+legend("top", c("LOESS Data","Flexi","Fixed"), lty=1, lwd=2, xpd=TRUE, horiz=TRUE, inset=c(-.2,-.2), bty = "n", col=c("gray","darkorange","blue"), cex=1)
+
+plot(as.numeric(data), col="gray", type="l", lwd=3)
+lines(fit.raw$data$seasonal+fit.raw$data$trend, col="darkorange", lwd=3)
+lines(fit.loess$data$seasonal+fit.loess$data$trend, col="blue", lwd=3)
+lines(fit.raw$data$trend, col="darkorange", lwd=3, lty=2)
+lines(fit.loess$data$trend, col="blue", lwd=3, lty=2)
+legend("top", c("Data","Flexi-Raw Data","Flexi-LOESS Data"), lty=1, lwd=2, xpd=TRUE, horiz=TRUE, inset=c(-.2,-.2), bty = "n", col=c("gray","darkorange","blue"), cex=1)
+```
+
+Once the data have been detrended a quadratic polynomial can be fitted to the data. The residuals are simply the difference of the detrended data and the polynomial.
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8, fig.cap="Mossel Bay DEA Temperature Distribution"}
+
+detrend <- fit.raw$data$seasonal + fit.raw$data$remainder
+seas <- fit.raw$data$seasonal
+ind.nan1 <- which(!is.na(detrend))
+ind.nan2 <- which(!is.na(seas))
+
+t=1:length(detrend)
+x1=sin(t*2*pi/365)
+x2=cos(t*2*pi/365)
+model1 = lm(detrend~x1+x2,na.action=na.omit)
+model2 = lm(seas~x1+x2,na.action=na.omit)
+summary(model1)
+
+f1 <- fitted(model1)
+f2 <- fitted(model2)
+ff1 <- rep_len(NA, length.out = length(detrend))
+ff1[ind.nan1] <- f1
+ff2 <- rep_len(NA, length.out = length(detrend))
+ff2[ind.nan2] <- f2
+
+plot(fit.raw$data$raw, type='l', ylab='', lwd=2, col="gray") # detrended
+#lines(seas+fit.raw$data$trend, col="goldenrod1", lwd=3)
+#lines(ff1, col="red", lwd=2)                       # poly fitted to detrended
+lines(ff2+fit.raw$data$trend, col="blue", lwd=3)    # poly fitted to seasonal
+lines(fit.loess$data$seasonal+fit.loess$data$trend, col="red", lwd=3)
+lines(fit.raw$data$trend, col="blue", lwd=3, lty=2)    # poly fitted to seasonal
+lines(fit.loess$data$trend, col="red", lwd=3, lty=2)
+legend("top", c("Data","Flexi","Fixed Sine"), lty=1, lwd=2, xpd=TRUE, horiz=TRUE, inset=c(-.2,-.2), bty = "n", col=c("gray","red","blue"), cex=1)
+```
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8, fig.cap="Mossel Bay DEA Temperature Distribution"}
+
+resid <- detrend - ff + fit$data$trend              # remove seasonal and add trend
+
+plot(fit$data$raw, type='l', ylab='', lwd=2, col="gray")
+lines(resid, col="black", lwd=2)
+abline(0,0,col="red", lwd=2)
+```
+
+Alternatively we can apply a WMA to smooth the extracted seasonal signal.
+
+
+### Seasonal ARIMA
+
+*Unit Root*
+
+Often, ordinary least squares (OLS) is used to estimate the slope coefficients of the autoregressive model. Use of OLS relies on the stochastic process being stationary. When the stochastic process is non-stationary, the use of OLS can produce invalid estimates.
+
+To estimate the slope coefficients, one should first conduct a unit root test, whose null hypothesis is that a unit root is present. If that hypothesis is rejected, one can use OLS. However, if the presence of a unit root is not rejected, then one should apply the difference operator to the series. If another unit root test shows the differenced time series to be stationary, OLS can then be applied to this series to estimate the slope coefficients.
+
+Shocks to a unit root process have permanent effects which do not decay as they would if the process were stationary
+
+Assumptions that the time series must be stationary, i.e. constant mean and variance. This can be achieved by differencing. Patterns are also required to have constant periods.
+
+### GAMM
+
+If the data show both seasonal patterns and a changing trend, the data can be modeled by *adding* the two structures together. A GAM is similar to regression in that it sums individual components but using smoothing functions rather than predictor variables. The functions allow GAMs to eliminate the assumption of linear relations between predictor variable and outcome.
+
+## Modelling serial correlation of variance (conditional heteroscedasticity)
+
+The best options so far seems to be to fit a LOESS seasonal spline to the LOESS smoothed time series of raw data. This produces a near identical seasonal signal to the LOESS smoother applied to LOESS seasonal spline based on raw data. The residuals are then;
+
+residuals = raw data - smooth seasonal - trend
+
+The residuals still show auto correlation, which can be removed by first difference. The ACF of the first difference indicates no significant auto correlation. However, the ACF of the variance or square of the residuals, shows seasonal auto correlation.
+
+"The multiplicative seasonal GARCH model is appropriate for time series where significant autocorrelation exists at seasonal and at adjacent non-seasonal lags" - Chp 3 from *Advances in Econometrics - Theory and Applications*
+
+Below we look at the *Periodic Autoregression* (PAR) in the residuals using the perARMA package.
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8, fig.cap="Seasonal Mean and SD"}
+library(perARMA)
+library(lubridate)
+# arrange the data to begin on 1 January
+ind.st <- which(format(dataMB_day_DEA$date, "%j")=="001")[1]
+ind.end <- tail(which(format(dataMB_day_DEA$date, "%j")=="365"),n=1)
+
+par.res <- ts(data.res[ind.st:ind.end], frequency = 365, start = c(dataMB_day_DEA$year[ind.st], 001))
+par <- perYW(par.res, T = 365, p = 1, missval = "NaN")
+plot(par$phi, type="l")
+```
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8, fig.cap="Seasonal Mean and SD"}
+
+# plot the sd of the residuals and sd of the data grouped by DOY
+ggplot() +
+  stat_summary(data = df.data, aes(y=Temp, x=DOY, group=1), fun.y=sd, geom="line", colour="blue", lwd=2) +
+  stat_summary(data = df.res, aes(y=res.sq, x=doy, group=1), fun.y=median, geom="line", colour="red", lwd=2)
+```
+
+
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8, fig.cap="Analysis of residuals"}
+
+p1 <- plot(fit.loess$data$res_unsmoo, type="l")
+lines(diff(fit.loess$data$res_unsmoo, lag=1), col="red")
+
+p2 <- acf(fit.loess$data$res_unsmoo)               # AR in residuals
+p3 <- acf(diff(fit.loess$data$res_unsmoo, lag=1))  # no AR in first difference
+p4 <- acf(diff(fit.loess$data$res_unsmoo, lag=1)^2, lag.max = 1500)
+
+```
+
 ## Data distribution
 
 ### Raw data
@@ -839,16 +1148,70 @@ ggplot(df_res) +
 
 ## Change point detection
 
-Consider a moving window of 30 days. Plot the mean, median and variance of the deseasoned data and check where mean/median differences and variance changes.
+Consider a moving window of 30 days. Plot the mean, median and variance of the deseasoned data and check where mean/median differences and variance changes. Presumably a change in instrument could affect the variance only or a change in location could affect the mean only. The tests below are performed on the Mossel Bay DEA *in situ* data with the seasonal signal removed. No trend is removed as the trend itself may be an indicator of instrument change.
 
 Consider change-point analysis where a point or multiple points are detected such that the mean and/or variance of the data before and after the point is significantly different. From the R changepoint package;
 * binary segmentation - find 1st change point, split series on cp and repeat (approximate because the cp's depend on the 1st cp)
 * segment neighbourhood - uses dynamic programming (exact)
 * PELT - similar to SN but prunes along the way, assumes cp increases linearly with series i.e. changepoints are spread throughout rather than in one portion - problem?1
 
-From the R package 'changepoint', changes in mean and variance are detected separately. Presumably a change in instrument could affect the variance only or a change in location could affect the mean only. The tests below are performed on the Mossel Bay DEA *in situ* data with the seasonal signal removed. No trend is removed as the trend itself may be an indicator of instrument change.
+From the R package 'changepoint', changes in mean and variance are detected separately. Currently, the changepoint package is only suitable for finding changes in mean or
+variance. This package also estimates multiple change points through the use of penalization. The drawback to this approach is that it requires a user specified penalty term.
 
-Change in the mean has multiple 
+The cpm package (Ross 2013) similarly provides a variety of methods for performing change
+point analysis of univariate time series. These methods range from those to detect changes in independent Gaussian data to fully nonparametric methods that can detect general distributional changes. Although this package provides methods to perform analysis of univariate time series with arbitrary distributions, these methods cannot be easily extended to detect changes in the full joint distribution of multivariate data.
+
+For the R package 'ecp' the only assumptions placed on distributions are that the absolute αth moment exists, for some α ∈ (0, 2], and that observations are *independent over time*. Autocorrelations can lead to false positives.
+
+Change in the mean has multiple
+
+Here, I begin working on the residuals after the trend (via STL) and seasons (polynomial fitted to the detrended data) are removed.
+
+One obvious problem with the data is the seasonal change in variance.
+
+```{r, echo=FALSE, warning=FALSE, fig.height=8, fig.cap="SST Residual Distribution"}
+#data.raw <- dataMB_day_DEA$temp
+dates <- dataMB_day_DEA$date
+data.raw <- data.nona
+data.seas <- fit.loess$data$seasonal
+data.trend <- fit.loess$data$trend
+data.noseas <- data.raw - data.seas
+data.res <- data.raw - data.seas - data.trend
+
+data.cp <- data.frame("date"=dates,
+                      "raw"=data.raw,
+                      "seasonal"=data.seas,
+                      "non-seas"=data.noseas,
+                      "trend"=data.trend,
+                      "residuals"=data.res, stringsAsFactors = F)
+
+cp.jan <- data.cp$residuals[which(dataMB_day_DEA$month == "Jan")]
+cp.jan <- cp.jan[!is.na(cp.jan)]
+cp.apr <- data.cp$residuals[which(dataMB_day_DEA$month == "Apr")]
+cp.apr <- cp.apr[!is.na(cp.apr)]
+cp.jul <- data.cp$residuals[which(dataMB_day_DEA$month == "Jul")]
+cp.jul <- cp.jul[!is.na(cp.jul)]
+cp.oct <- data.cp$residuals[which(dataMB_day_DEA$month == "Oct")]
+cp.oct <- cp.oct[!is.na(cp.oct)]
+
+fit.norm.jan <- fitdist(cp.jan, "norm")       # not-normal
+fit.norm.apr <- fitdist(cp.apr, "norm")       # not-normal
+fit.norm.jul <- fitdist(cp.jul, "norm")       # not-normal
+fit.norm.oct <- fitdist(cp.oct, "norm")       # not-normal
+
+plot(fit.norm.jan, breaks=20)
+plot(fit.norm.apr, breaks=20)
+plot(fit.norm.jul, breaks=20)
+plot(fit.norm.oct, breaks=20)
+
+plot(cp.jan, type="l", col="red", lwd=3)
+lines(cp.apr, col="goldenrod1", lwd=3)
+lines(cp.jul, col="blue", lwd=3)
+lines(cp.oct, col="chartreuse3", lwd=3)
+
+```
+
+As none of the monthly residual plots are normally distributed, a non-parametric change point detection method is required.
 
 # Possible validation of difference among datasets
 

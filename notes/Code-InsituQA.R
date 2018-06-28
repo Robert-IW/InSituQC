@@ -5,9 +5,11 @@ library(changepoint)
 library(changepoint.np)
 library(nortest)
 library(qcc)
+require(stats)
 
 load("~/Data/SACTNdaily_v4.1.Rdata")
 load("~/Data/SACTNhourly_v4.1.Rdata")
+load("~/Data/dataMB_day_DEA.Rdata")
 
 dataMB_day_DEA <- subset(SACTNdaily_v4.1, site=="Mossel Bay" & src=="DEA")
 dataMB_day_SAWS <- subset(SACTNdaily_v4.1, site=="Mossel Bay" & src=="SAWS")
@@ -337,15 +339,59 @@ cp_np@param.est[2]
 
 plot(cp_np)
 
+# non parametric change point detection
 require(ecp)
-data_ediv <- dataMB_day_DEA$res[!dataMB_day_DEA$NA_idx]
-mat_ediv <- as.matrix(data_ediv)
-cp_ediv <- e.divisive(X=mat_ediv, min.size=182, k=NULL, alpha=2, sig.lvl = 0.9)
+# first difference
+mat_ediv <- as.matrix(log(diff(data.cp$non.seas, lag=1)))
 
-ggplot(data=dataMB_day_DEA[!dataMB_day_DEA$NA_idx,]) +
-  geom_line(aes(y=res,x=seq(1,length(temp),1))) +
+# adjust mean
+non.seas <- data.cp$non.seas
+non.seas[2000:4000] <- non.seas[2000:4000]+1
+mat_ediv <- as.matrix(diff(non.seas), lag=1)
+
+cp_ediv <- e.divisive(X=mat_ediv,
+                      min.size=180,
+                      k=NULL,
+                      alpha=1,
+                      sig.lvl = 0.05,
+                      R=199)
+ggplot() +
+  geom_line(aes(y=mat_ediv[,1],x=seq(1,nrow(mat_ediv),1))) +
   #geom_line(aes(y=raw,x=seq(1,length(temp),1)), colour="blue") +
   geom_vline(xintercept=cp_ediv$estimates, colour="red", linetype="dashed")
+
+mon.name <- as.list(month.abb)
+cp.data <- lapply(mon.name, function(x) 
+  data.frame(date=data.cp$date[which(format(data.cp$date,"%b")==x)],
+             res=data.cp$residuals[which(format(data.cp$date,"%b")==x)]))
+
+cp.calc <- function(df){
+  mat_ediv <- as.matrix(df)
+  cp_ediv <- e.divisive(X=mat_ediv, min.size=31, k=NULL, alpha=2, sig.lvl = 0.05)
+  return(cp_ediv)
+}
+
+cp.cp <- lapply(cp.data, function(x) cp.calc(x))
+
+cp.plot <- mapply(function(X,Y) {
+  sapply(1:12, function(loc) plot(Y[[loc]]$res ~ Y[[loc]]$date))
+  }, X=cp.cp, Y=cp.data)
+
+cp.plot <- mapply(function(X,Y) {
+  sapply(1:12, function(loc) ggplot(data=Y[[loc]]) +
+           geom_line(aes(y=res, x=date)) +
+           geom_vline(xintercept=date[X[[loc]]$estimates],colour="red",linetype="dashed"))},
+                  X=cp.cp, Y=cp.data)
+
+mapply(function(X,Y) {
+  sapply(1:10, function(row) cor(X[row,], Y[row,]))
+}, X=listA, Y=listB)
+
+ggplot(data=data_ediv) +
+  geom_line(aes(y=jan,x=seq(1,nrow(data_ediv),1))) +
+  #geom_line(aes(y=raw,x=seq(1,length(temp),1)), colour="blue") +
+  geom_vline(xintercept=cp_ediv$estimates, colour="red", linetype="dashed")
+
 
 #********************************************************************************
 # Apply WMA to temperature time series
@@ -356,14 +402,15 @@ window_make <- function(len){
   return(window_point)
 }
 # start with 7(1), 15(2) and 31(3) day windows (also 61(4) and 91(5))
-window_size <- 91                         # total window length in days
+window_size <- 31                         # total window length in days
 window_point <- window_make(window_size)  # time points before and after t
+
 #weights <- 2/((window_point)+1)          # exponential weights
 weights <- 0 + (max(window_point)-(window_point-1))/
   max(window_point)                      # linear weights
 #weights <- window_point/window_point     # equal weights
 
-data_flt5_lin <- filter(data, weights/sum(weights), method="convolution", sides=2)
+data_flt5_lin <- stats::filter(data, weights/sum(weights), method="convolution", sides=2)
 
 plot(data[1:1000], type="l")
 lines(data_flt1[1:1000], col="red")
@@ -378,7 +425,7 @@ lines(data_flt2_sim[800:1000], col="blue", lwd=3)        # equal weights
 plot(data[800:1000], type="l", lwd=3)
 lines(data_flt3_lin[800:1000], col="red", lwd=3)         # 31 days
 lines(data_flt4_lin[800:1000], col="darkgreen", lwd=3)   # 61 days
-lines(data_flt5_lin[800:1000], col="blue", lwd=3)        # 91 days
+lines(data_flt5_lin[1:1000], col="blue", lwd=3)        # 91 days
 
 plot(data, type="l", lwd=3)
 lines(data_flt3_lin, col="red", lwd=3)
@@ -387,3 +434,5 @@ lines(data_flt5_lin, col="blue", lwd=3)
 
 plot(data, type="l", lwd=3)
 lines(data_flt4_lin, col="green", lwd=3)
+
+# Use the 31 day Linear Weighted Moving Average to extract Trend

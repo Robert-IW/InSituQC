@@ -9,14 +9,15 @@ library(zoo)
 
 load("~/R/Data/SACTNdaily_v4.1.Rdata")
 
-my.site <- c("Cape Agulhas","Betty's Bay","Mossel Bay","Mossel Bay")
-my.src <- c("SAWS","DAFF","DEA","SAWS")
+my.site <- c("Cape Agulhas","Betty's Bay","Mossel Bay","Mossel Bay","Stilbaai","Gordons Bay",
+             "De Hoop","Muizenberg","Richards Bay","Roman Rock")
+my.src <- c("SAWS","DAFF","DEA","SAWS","SAWS","SAWS","DAFF","SAWS","KZNSB","UWC")
 
-i=1
+i=10
 
 # Data Preparation --------------------------------------------------------
 
-data.in <- SACTNdaily_v4.1 %>% 
+data.in <- SACTN_daily_v4.2 %>% 
   dplyr::select(date,site,src,temp) %>% 
   filter(site==my.site[i],src==my.src[i])
 rm(i)
