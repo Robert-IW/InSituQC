@@ -3,6 +3,7 @@
 
 library(tidyverse)
 library(ggpubr)
+library(lubridate)
 library(FNN)
 library(akima)
 
@@ -47,7 +48,7 @@ xy <- expand.grid(xrng, yrng)
 bathy[bathy == info[6,2]] <- NA # Renames error values with NA
 bathy[bathy > 0] <- NA # Removes any values above the surface of the water
 bathy <-  t(bathy[nrow(bathy):1,]) # Adds a column giving row names
-bathy <- as.vector(melt(bathy, value.name = "z", na.rm = FALSE)$z)
+bathy <- as.vector(reshape2::melt(bathy, value.name = "z", na.rm = FALSE)$z)
 bathy <- as.data.frame(cbind(xy, bathy))
 colnames(bathy) <- c("lon", "lat", "depth"); rm(xy)
 
@@ -135,7 +136,9 @@ SACTN_dif$season[SACTN_dif$season == "Summer_dif"] <- "Summer"
 
 # Join the different dif outputs for plotting
 SACTN_combi <- SACTN_cut %>% 
-  left_join(SACTN_dif, join = c("lon", "lat", "index", "season"))
+  left_join(SACTN_dif, join = c("lon", "lat", "index", "season")) %>% 
+  na.omit() %>% # Remove Hout Bay
+  filter(index != "Dyer Island/DEA")
 
 
 # Interpolate SACTN -------------------------------------------------------
@@ -188,7 +191,7 @@ res_season_full <- rbind(res_winter_full, res_summer_full) %>%
 
 # Comparing Winter and SUmmer SACTN and OISST means
 dif_1 <- ggplot(OISST_cut, aes(x = lon, y = lat)) +
-  geom_raster(aes(fill = temp_cut)) +
+  geom_raster(aes(fill = temp_cut), show.legend = T) +
   # stat_contour(data = bathy, aes(x = lon, y = lat, z = depth, alpha = ..level..), 
   #              col = "grey70", size = 0.2, binwidth = 500, show.legend = F) +
   # geom_contour(data = bathy_mask_shelf, aes(z = depth), 
@@ -199,27 +202,29 @@ dif_1 <- ggplot(OISST_cut, aes(x = lon, y = lat)) +
   # geom_point(data = SACTN_combi, size = 2.36, shape = 21, 
   #            aes(fill = temp_cut, colour = dif), stroke = 1) +
   geom_point(data = SACTN_combi, size = 3, shape = 21, 
-             aes(fill = temp_cut), colour = "white", stroke = 0.5) +
+             aes(fill = temp_cut), colour = "white", stroke = 0.5, show.legend = F) +
   # geom_point(data = SACTN_combi, aes(colour = dif), 
   #            shape = "+", size = 4) +
   facet_wrap(~season, ncol = 2) +
   coord_equal(expand = 0, xlim = c(12, 37), ylim = c(-25, -38)) +
   # scale_fill_viridis_d() +
   # scale_colour_viridis_d() +
-  scale_fill_brewer("Temp. (C)", palette = "Spectral", direction = -1, breaks = breaks) +
+  scale_fill_brewer("Temp. (°C)", palette = "Spectral", direction = -1) +
   # scale_colour_brewer(palette = "Spectral", direction = -1) +
-  scale_colour_gradient2(low = "black", high = "white") +
+  # scale_colour_gradient2(low = "black", high = "white") +
   labs(x = "", y = "") +
   theme(legend.direction = "horizontal",
         legend.position = "bottom")
 # dif_1
+ggsave(plot = dif_1, filename = "graph/summer_winter_diff.png", height = 4, width = 10)
+ggsave(plot = dif_1, filename = "graph/summer_winter_diff.pdf", height = 4, width = 10)
 
 # Line graph showing difference along coast
 dif_2 <- ggplot(data = res_season_full, aes(x = index)) +
   geom_ribbon(aes(ymax = Winter, ymin = Summer))
 # dif_2
 
-ggarrange(dif_1, dif_2, ncol = 1, nrow = 2, heights = c(5,1), align = "h", axis = "l")
+# ggarrange(dif_1, dif_2, ncol = 1, nrow = 2, heights = c(5,1), align = "h", axis = "l")
 gridExtra::grid.arrange(dif_1, dif_2, layout_matrix = cbind(c(1,1,1,NA), c(1,1,1,2),
                                                             c(1,1,1,2), c(1,1,1,NA)))
 cowplot::plot_grid(dif_1, dif_2, labels = NULL, ncol = 1, 
