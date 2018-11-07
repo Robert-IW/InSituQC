@@ -30,6 +30,20 @@ set.seed(12)
 
 # Run the functions -------------------------------------------------------
 
+# dtrend the time series using STL
+# set parameters for stlplus
+t.w <- 5*365
+s.w <- 3*365
+ts.detrend <- function(ts){
+  make.ts <- ts(ts, frequency = 365)
+  stl.ts <- stlplus(make.ts, s.window = s.w,
+                    s.degree = 1, t.window = t.w, n.p = 365)
+  trend.ts <- ts(stl.ts$data$trend, frequency=365)
+  seas.ts <- ts(stl.ts$data$seasonal, frequency=365)
+  res.ts <- ts(stl.ts$data$remainder, frequency=365)
+  return(as.numeric(res.ts+seas.ts+mean(trend.ts)))
+}
+
 # this function looks for long NA segments that cannot be interpolated satisfactorily
 # the longest set of observations are returned
 strip.na <- function(x){
@@ -306,98 +320,101 @@ for (i in 1:nclust){
     
     stat.name <- as.character(site_list$index[ind.grp[j]])
     
-    #------------------------------------------------------------------------
-    # fill in missing values using lm with stations that have r>0.8
-    # find the longest non-NA segement
-    # each matching station is used individually to fill in missing data to
-    #   maximize filled in values
-    
-    grp.stat <- as.vector(site_list$index[ind.grp])
-    grp.stats <- df.data.stor %>% 
-      filter(index %in% grp.stat) %>% 
-      spread(index, temp)
-    rm(grp.stat)
-    
-    # trim the df for the selected station (first and last non-NA)
-    query.stat <- rlang::sym(stat.name)
-    query.ind <- which(colnames(grp.stats) == query.stat) # first column in date
-    grp.stats <- ts.trim(grp.stats, query.ind)            # returns trimmed df
-    
-    # strip down to the longest section of non-NA
-    ind.long <- strip.na(grp.stats[,query.ind, drop=T])     # returns indices to longest non-NA
-    grp.sect <- grp.stats[ind.long,]
-    
-    grp.cor <- cor(grp.sect[,-1], use = "pairwise.complete.obs")
-    corrplot(grp.cor)
-    
-    # get the strongest correlation stations r > 0.8 (1 is always self)
-    stat.corr <- sort(grp.cor[,(query.ind-1)], decreasing = T)
-    stat.refs <- stat.corr[2:length(which(stat.corr > .8))]
-    
-    # create time series of original data
-    doy <- format(grp.stats$date[1], "%j")
-    yr <- format(grp.stats$date[1], "%Y")
-    
-    y.in <- as.ts(grp.stats[,query.ind], frequency=365)[,1]
-    y.na <- which(is.na(y.in))
-    x.in <- as.ts(grp.stats[names(stat.refs)], frequency=365)
-    #names(x.in) <- stat.refs
-
-    # find which time series are best for filling in missing data
-    if (ncol(x.in)>1){
-      pair.comb <- combn(1:ncol(x.in),2,simplify=FALSE)
-      # get the highest number of complete observations where y is NA
-      best.comb <- sapply(pair.comb, function(x) length(na.omit(x.in[y.na, x])))
-      if (length(best.comb)==1 & best.comb == 0){        # if there are no overlapping data in regressors
-        # evaluate the regrssors individually
-        best.comb <- sapply(1:ncol(x.in), function(x) length(na.omit(x.in[y.na, x])))
-        best.comb <- which(best.comb==max(best.comb))
-        x.in <- x.in[,best.comb]
-      } else {
-        best.comb <- which(best.comb==max(best.comb))
-        if (length(best.comb)>1){
-          best.comb <- best.comb[1]
-        }
-        x.in <- x.in[,pair.comb[[best.comb]]]
-      } 
-    }
-    
-    # get the detail of the regression station for plot
-    corr.stats <- stat.refs[names(stat.refs) %in% colnames(x.in)]
-    subtitle <- sapply(1:length(corr.stats), 
-                       function(x) paste0(names(corr.stats[x]),
-                                          " (r=",round(as.vector(corr.stats[x]),2),")"))
-    subtitle <- str_c(subtitle, collapse=" ")
-    
-    df.in.train <- data.frame(cbind(y.in, x.in))
-    fit.reg <- lm(y.in ~ ., data = df.in.train)
-    df.in.pred <- data.frame(df.in.train[,-1])
-    names(df.in.pred) <- names(df.in.train)[-1]
-    pred.reg <- predict(fit.reg, newdata = df.in.pred)
-    pred.reg <- ts(pred.reg, frequency=365, 
-                   start = c(as.numeric(yr),as.numeric(doy)))
-    
-    # fit.reg <- auto.arima(y.in, xreg=cbind(x.in), seasonal=F,
-    #                       allowdrift = F)
-    # pred.reg <- ts(predict(fit.reg, 
-    #                        newxreg = cbind(x.in))[[1]], frequency=365,
+# Fill in NA intelligently #------------------------------------------------------------------------
+    # # fill in missing values using lm with stations that have r>0.8
+    # # find the longest non-NA segement
+    # # each matching station is used individually to fill in missing data to
+    # #   maximize filled in values
+    # 
+    # grp.stat <- as.vector(site_list$index[ind.grp])
+    # grp.stats <- df.data.stor %>% 
+    #   filter(index %in% grp.stat) %>% 
+    #   spread(index, temp)
+    # rm(grp.stat)
+    # 
+    # # trim the df for the selected station (first and last non-NA)
+    # query.stat <- rlang::sym(stat.name)
+    # query.ind <- which(colnames(grp.stats) == query.stat) # first column in date
+    # grp.stats <- ts.trim(grp.stats, query.ind)            # returns trimmed df
+    # 
+    # # strip down to the longest section of non-NA
+    # ind.long <- strip.na(grp.stats[,query.ind, drop=T])     # returns indices to longest non-NA
+    # grp.sect <- grp.stats[ind.long,]
+    # 
+    # grp.cor <- cor(grp.sect[,-1], use = "pairwise.complete.obs")
+    # corrplot(grp.cor)
+    # 
+    # # get the strongest correlation stations r > 0.8 (1 is always self)
+    # stat.corr <- sort(grp.cor[,(query.ind-1)], decreasing = T)
+    # stat.refs <- stat.corr[2:length(which(stat.corr > .8))]
+    # 
+    # # create time series of original data
+    # doy <- format(grp.stats$date[1], "%j")
+    # yr <- format(grp.stats$date[1], "%Y")
+    # 
+    # y.in <- as.ts(grp.stats[,query.ind], frequency=365)[,1]
+    # y.na <- which(is.na(y.in))
+    # x.in <- as.ts(grp.stats[names(stat.refs)], frequency=365)
+    # #names(x.in) <- stat.refs
+    # 
+    # # find which time series are best for filling in missing data
+    # if (ncol(x.in)>1){
+    #   pair.comb <- combn(1:ncol(x.in),2,simplify=FALSE)
+    #   # get the highest number of complete observations where y is NA
+    #   best.comb <- sapply(pair.comb, function(x) length(na.omit(x.in[y.na, x])))
+    #   if (length(best.comb)==1 & best.comb == 0){        # if there are no overlapping data in regressors
+    #     # evaluate the regrssors individually
+    #     best.comb <- sapply(1:ncol(x.in), function(x) length(na.omit(x.in[y.na, x])))
+    #     best.comb <- which(best.comb==max(best.comb))
+    #     x.in <- x.in[,best.comb]
+    #   } else {
+    #     best.comb <- which(best.comb==max(best.comb))
+    #     if (length(best.comb)>1){
+    #       best.comb <- best.comb[1]
+    #     }
+    #     x.in <- x.in[,pair.comb[[best.comb]]]
+    #   } 
+    # }
+    # 
+    # # get the detail of the regression station for plot
+    # corr.stats <- stat.refs[names(stat.refs) %in% colnames(x.in)]
+    # subtitle <- sapply(1:length(corr.stats), 
+    #                    function(x) paste0(names(corr.stats[x]),
+    #                                       " (r=",round(as.vector(corr.stats[x]),2),")"))
+    # subtitle <- str_c(subtitle, collapse=" ")
+    # 
+    # df.in.train <- data.frame(cbind(y.in, x.in))
+    # fit.reg <- lm(y.in ~ ., data = df.in.train)
+    # df.in.pred <- data.frame(df.in.train[,-1])
+    # names(df.in.pred) <- names(df.in.train)[-1]
+    # pred.reg <- predict(fit.reg, newdata = df.in.pred)
+    # pred.reg <- ts(pred.reg, frequency=365, 
     #                start = c(as.numeric(yr),as.numeric(doy)))
-    
-    #--------------------------------------------------------------------------
-    stat.name <- as.character(site_list$index[ind.grp[j]])
+    # 
+    # # fit.reg <- auto.arima(y.in, xreg=cbind(x.in), seasonal=F,
+    # #                       allowdrift = F)
+    # # pred.reg <- ts(predict(fit.reg, 
+    # #                        newxreg = cbind(x.in))[[1]], frequency=365,
+    # #                start = c(as.numeric(yr),as.numeric(doy)))
+    # 
+# Get the trended and detrended data ----------------------------------------------
+    #stat.name <- as.character(site_list$index[ind.grp[j]])
     #print(paste("Working on Station ",stat.name))
     #data.in <- SACTN_daily_v4.2[which(SACTN_daily_v4.2$index == site_list$index[ind.grp[j]]),]
-    data.in <- df.data.stor[which(df.data.stor$index == site_list$index[ind.grp[j]]),]
-    
+    data.org <- df.data.stor[which(df.data.stor$index == site_list$index[ind.grp[j]]),]
+
     # record data with trend for CP detection
-    df.data.trend <- data.frame("date"=data.in$date, 
-                                "temp.org"=data.in$temp,
-                                "doy"=as.numeric(format(data.in$date, "%j")),
-                                "dom"=format(data.in$date, "%d"),
-                                "month"=as.numeric(format(data.in$date, "%m")),
-                                "year"=format(data.in$date, "%Y"),
-                                stringsAsFactors = F)
-    
+    df.data.trend <- data.org %>% 
+      mutate(month = as.numeric(format(date, "%m")), 
+             year = format(date, "%Y"),
+             doy = as.numeric(format(date, "%j")),
+             dom = format(date, "%d")) %>% 
+      group_by(month, year) %>% 
+      mutate(ind.NAmonth = ifelse(sum(is.na(temp)) / length(temp) > 0.5, 99, NA)) %>% 
+      mutate(ind.NAmonth = ifelse(all(is.na(ind.NAmonth)), NaN, ind.NAmonth)) %>% 
+      mutate(NAmonth = coalesce(ind.NAmonth, temp)) %>% 
+      ungroup()
+
     df.data.trend <- df.data.trend %>% 
       dplyr::filter(!is.na(doy))
     
@@ -423,94 +440,114 @@ for (i in 1:nclust){
     rm(begin.day, ind.begin)
     
     # create time series of original data
-    doy <- format(data.in$date[1], "%j")
-    yr <- format(data.in$date[1], "%Y")
-    tot.yr <- length(unique(format(data.in$date, "%Y")))
+    doy <- format(data.org$date[1], "%j")
+    yr <- format(data.org$date[1], "%Y")
+    tot.yr <- length(unique(format(data.org$date, "%Y")))
     
-    x.ts <- ts(data.in$temp, frequency=365,
+    x.ts <- ts(data.org$temp, frequency=365,
                   start = c(as.numeric(yr),as.numeric(doy)))
     
-    # remove long NA periods or extract useful lengths
-    x <- data.in$temp
+    # mark months with more than 30% NA and detrended and combination of both
+    data.in <- data.org %>% 
+      mutate(month = as.numeric(format(date, "%m")), 
+             year = format(date, "%Y"),
+             doy = as.numeric(format(date, "%j")),
+             dom = format(date, "%d")) %>% 
+      group_by(month, year) %>% 
+      mutate(ind.NAmonth = ifelse(sum(is.na(temp)) / length(temp) > 0.5, 99, NA)) %>% 
+      mutate(ind.NAmonth = ifelse(all(is.na(ind.NAmonth)), NaN, ind.NAmonth)) %>% 
+      mutate(noTrend = ifelse(length(temp)>365*5, ts.detrend(temp), temp),
+             NAmonth = coalesce(ind.NAmonth, noTrend)) %>% 
+      ungroup()
+    
+    # get index of longest period without consecutive NA > 365
+    x <- data.org$temp
     y <- strip.na(x)
-    data.in <- data.in[y,]
+    data.org <- data.org %>% 
+      mutate(ind.long = NA)
+    data.org$ind.long[y] <- 1
+     
+# STL to remove trend -----------------------------------------------------
+# 
+#     # fill in missing values using double STL
+#     doy <- format(data.in$date[1], "%j")
+#     yr <- format(data.in$date[1], "%Y")
+#     tot.yr <- length(unique(format(data.in$date, "%Y")))
+#     
+#     data.ts <- ts(data.in$temp, frequency=365,
+#                   start = c(as.numeric(yr),as.numeric(doy)))
+#     
+#     if (length(data.ts) < 365){
+#       next
+#     }
+#     
+#     na.ind <- which(is.na(data.ts))
+#     
+#     if (length(na.ind)/length(data.ts)>0.5){
+#       print(paste("Too many NA ", stat.name))
+#       next
+#     } else if (length(na.ind) > 0){
+#       data.nona <- na.interp(data.ts,lambda=NULL)
+#       if (tot.yr < 4){
+#         t.w <- (tot.yr-1)*365
+#         s.w <- t.w
+#       } else {
+#         t.w <- 5*365
+#         s.w <- 3*365
+#       }
+#       stl.nona <- stlplus(data.nona, s.window = s.w,
+#                           s.degree = 1, t.window = t.w, n.p = 365)
+#       trend.ts <- ts(stl.nona$data$trend, frequency=365,
+#                      start = c(as.numeric(yr),as.numeric(doy)))
+#       data.nona[na.ind] <- stl.nona$data$seasonal[na.ind]+stl.nona$data$trend[na.ind]
+#     } else {
+#       data.nona <- data.ts
+#       if (tot.yr < 4){
+#         t.w <- (tot.yr-1)*365
+#         s.w <- t.w
+#       } else {
+#         t.w <- 5*365
+#         s.w <- 3*365
+#       }
+#       stl.nona <- stlplus(data.nona, s.window = s.w,
+#                           s.degree = 1, t.window = t.w, n.p = 365)
+#       trend.ts <- ts(stl.nona$data$trend, frequency=365,
+#                      start = c(as.numeric(yr),as.numeric(doy)))
+#       
+#     }
+#     
+#     filename <- paste0(data.dir2,
+#                        gsub(x=stat.name, pattern="/",replacement="_"),
+#                        "_fillNA.png")
+#     png(filename, width = 18, height = 24, units = "cm", res = 300)
+#     par(mfrow=c(3,1))
+#     y.minmax <- c(floor(min(x.ts, na.rm=T)),ceiling(max(x.ts, na.rm=T)))
+#     plot.ts(x.ts, main=paste("Original ", stat.name), ylim=y.minmax,
+#             ylab="Temperature (°C)", xlab="Years")
+#     plot.ts(data.nona, col="red",main=paste("Extracted STL ", stat.name), 
+#             ylim=y.minmax, ylab="Temperature (°C)", xlab="Years")
+#     lines(data.ts, col="black")
+#     plot.ts(pred.reg,  col="red",main=paste("Extracted Ref. Site", stat.name), 
+#             ylim=y.minmax, ylab="Temperature (°C)", xlab="Years", sub=subtitle)
+#     lines(x.ts, col="black")
+#     dev.off()
+#     
+#     # remove the trend from the data for monthly mean change
+#     data.nona.trend <- data.nona
+#     data.nona <- data.nona-trend.ts
+
+# Create Data frame -------------------------------------------------------
     
-    # fill in missing values using double STL
-    doy <- format(data.in$date[1], "%j")
-    yr <- format(data.in$date[1], "%Y")
-    tot.yr <- length(unique(format(data.in$date, "%Y")))
-    
-    data.ts <- ts(data.in$temp, frequency=365,
-                  start = c(as.numeric(yr),as.numeric(doy)))
-    
-    if (length(data.ts) < 365){
-      next
-    }
-    
-    na.ind <- which(is.na(data.ts))
-    
-    if (length(na.ind)/length(data.ts)>0.5){
-      print(paste("Too many NA ", stat.name))
-      next
-    } else if (length(na.ind) > 0){
-      data.nona <- na.interp(data.ts,lambda=NULL)
-      if (tot.yr < 4){
-        t.w <- (tot.yr-1)*365
-        s.w <- t.w
-      } else {
-        t.w <- 5*365
-        s.w <- 3*365
-      }
-      stl.nona <- stlplus(data.nona, s.window = s.w,
-                          s.degree = 1, t.window = t.w, n.p = 365)
-      trend.ts <- ts(stl.nona$data$trend, frequency=365,
-                     start = c(as.numeric(yr),as.numeric(doy)))
-      data.nona[na.ind] <- stl.nona$data$seasonal[na.ind]+stl.nona$data$trend[na.ind]
-    } else {
-      data.nona <- data.ts
-      if (tot.yr < 4){
-        t.w <- (tot.yr-1)*365
-        s.w <- t.w
-      } else {
-        t.w <- 5*365
-        s.w <- 3*365
-      }
-      stl.nona <- stlplus(data.nona, s.window = s.w,
-                          s.degree = 1, t.window = t.w, n.p = 365)
-      trend.ts <- ts(stl.nona$data$trend, frequency=365,
-                     start = c(as.numeric(yr),as.numeric(doy)))
-      
-    }
-    
-    filename <- paste0(data.dir2,
-                       gsub(x=stat.name, pattern="/",replacement="_"),
-                       "_fillNA.png")
-    png(filename, width = 18, height = 24, units = "cm", res = 300)
-    par(mfrow=c(3,1))
-    y.minmax <- c(floor(min(x.ts, na.rm=T)),ceiling(max(x.ts, na.rm=T)))
-    plot.ts(x.ts, main=paste("Original ", stat.name), ylim=y.minmax,
-            ylab="Temperature (°C)", xlab="Years")
-    plot.ts(data.nona, col="red",main=paste("Extracted STL ", stat.name), 
-            ylim=y.minmax, ylab="Temperature (°C)", xlab="Years")
-    lines(data.ts, col="black")
-    plot.ts(pred.reg,  col="red",main=paste("Extracted Ref. Site", stat.name), 
-            ylim=y.minmax, ylab="Temperature (°C)", xlab="Years", sub=subtitle)
-    lines(x.ts, col="black")
-    dev.off()
-    
-    # remove the trend from the data for monthly mean change
-    data.nona.trend <- data.nona
-    data.nona <- data.nona-trend.ts
-    
-    # create data frame with no missing values
-    df.data <- data.frame("temp"=data.nona,
-                          "temp.trend"=data.nona.trend,
-                          "date"=data.in$date,
-                          "doy"=as.numeric(format(data.in$date, "%j")),
-                          "dom"=format(data.in$date, "%d"),
-                          "month"=as.numeric(format(data.in$date, "%m")),
-                          "year"=format(data.in$date, "%Y"),
-                          stringsAsFactors = F)
+    df.data <- data.in
+    # # create data frame with no missing values
+    # df.data <- data.frame("temp"=data.nona,
+    #                       "temp.trend"=data.nona.trend,
+    #                       "date"=data.in$date,
+    #                       "doy"=as.numeric(format(data.in$date, "%j")),
+    #                       "dom"=format(data.in$date, "%d"),
+    #                       "month"=as.numeric(format(data.in$date, "%m")),
+    #                       "year"=format(data.in$date, "%Y"),
+    #                       stringsAsFactors = F)
     
     df.data <- df.data %>% 
       dplyr::filter(!is.na(doy))
@@ -534,13 +571,14 @@ for (i in 1:nclust){
     # create year/month summaries
     df.data.yrmon <- df.data %>%
       group_by(year, month) %>% 
-      summarize(mean=mean(temp, na.rm=T),
-                med=median(temp, na.rm=T),
-                sd=sd(temp, na.rm=T),
-                max=max(temp, na.rm=T),
-                min=min(temp, na.rm=T))
+      summarize(mean=mean(NAmonth, na.rm=T),
+                med=median(NAmonth, na.rm=T),
+                sd=sd(NAmonth, na.rm=T),
+                max=max(NAmonth, na.rm=T),
+                min=min(NAmonth, na.rm=T))
     
-    st.mon <- as.numeric(sprintf("%02d",df.data.yrmon$month[1]))
+    # st.mon <- as.numeric(sprintf("%02d",df.data.yrmon$month[1]))
+    st.mon <- as.numeric(df.data.yrmon$month[1])
     st.year <- as.numeric(df.data.yrmon$year[1])
     end.year <- max(as.numeric(df.data.yrmon$year))
     
@@ -548,13 +586,13 @@ for (i in 1:nclust){
     df.data.yrmon$med <- ts(df.data.yrmon$med, frequency=12, start=c(st.year, st.mon))
     df.data.yrmon$sd <- ts(df.data.yrmon$sd, frequency=12, start=c(st.year, st.mon))
     
-    # create monthly summaries for training data
+    # create monthly summaries for training data (not based on '99' NA months)
     df.data.mon <- df.data %>%
-      dplyr::select(dom, month, year, temp) %>% 
+      dplyr::select(dom, month, year, temp) %>%
       mutate(year.dom=paste0(year,".",dom)) %>%
-      mutate(temp=as.numeric(temp)) %>% 
-      dplyr::select(month, year.dom, temp) %>% 
-      spread(year.dom, temp) %>% 
+      mutate(temp=as.numeric(temp)) %>%
+      dplyr::select(month, year.dom, temp) %>%
+      spread(year.dom, temp) %>%
       dplyr::select(-month)
     
     df.data.mon$mean <- apply(df.data.mon,1,mean,na.rm=T)
@@ -567,9 +605,9 @@ for (i in 1:nclust){
     cols <- as.character(paste(rep(A, each = length(B)), B, sep = "_"))
     rm(st.mon, st.year, end.year)
     
-    # for no NA with trend for 'bfast' package
-    df.daily <- data.frame(matrix(ncol = length(A)*31, nrow=12))
-    colnames(df.daily) <- rep(A, each=31)
+    # # for no NA with trend for 'bfast' package
+    # df.daily <- data.frame(matrix(ncol = length(A)*31, nrow=12))
+    # colnames(df.daily) <- rep(A, each=31)
     
     # for training
     df.temp <- data.frame(matrix(ncol = length(cols), nrow = 12))
@@ -577,12 +615,13 @@ for (i in 1:nclust){
     
     # create year/month summaries for test data (trend)
     df.data.yrmon.trend <- df.data.trend %>%
+      mutate(NAmonth = as.numeric(sub(99, NA, NAmonth))) %>% 
       group_by(year, month) %>% 
-      summarize(mean=mean(temp.org, na.rm=T),
-                med=median(temp.org, na.rm=T),
-                sd=sd(temp.org, na.rm=T),
-                max=max(temp.org, na.rm=T),
-                min=min(temp.org, na.rm=T))
+      summarize(mean=mean(NAmonth, na.rm=T),
+                med=median(NAmonth, na.rm=T),
+                sd=sd(NAmonth, na.rm=T),
+                max=max(NAmonth, na.rm=T),
+                min=min(NAmonth, na.rm=T))
     
     st.mon <- as.numeric(sprintf("%02d",df.data.yrmon.trend$month[1]))
     st.year <- as.numeric(df.data.yrmon.trend$year[1])
@@ -594,9 +633,10 @@ for (i in 1:nclust){
     
     # create monthly summaries for testing data (with trend)
     df.data.mon.trend <- df.data.trend %>%
-      dplyr::select(dom, month, year, temp.org) %>% 
+      mutate(NAmonth = as.numeric(sub(99, NA, NAmonth))) %>% 
+      dplyr::select(dom, month, year, NAmonth) %>% 
       mutate(year.dom=paste0(year,".",dom)) %>%
-      mutate(temp.org=as.numeric(temp.org)) %>% 
+      mutate(temp.org=as.numeric(NAmonth)) %>% 
       dplyr::select(month, year.dom, temp.org) %>% 
       spread(year.dom, temp.org) %>% 
       dplyr::select(-month)
@@ -630,28 +670,33 @@ for (i in 1:nclust){
       
       mon.name <- month.name[k]
       
+      #----------------------------------------------------------- original data
       mon <- as.matrix(df.data.mon[k,1:(ncol(df.data.mon)-2)])
-      ind <- which(is.na(mon))
-      
-      if (length(ind)>0){
-        mon <- mon[-ind]
-        col.names.mon <- col.names[-ind]
-      } else {
-        mon <- as.numeric(mon)
-        col.names.mon <- col.names
-      }
-      
+      col.names.mon <- col.names
+      # ind <- which(is.na(mon))
+      # 
+      # if (length(ind)>0){
+      #   mon <- mon[-ind]
+      #   col.names.mon <- col.names[-ind]
+      # } else {
+      #   mon <- as.numeric(mon)
+      #   col.names.mon <- col.names
+      # }
+      # 
       ind.yr <- match(unique(col.names.mon), col.names)
       ind.2 <- which(df.data.yrmon$month==k)
-      med <- df.data.yrmon$med[ind.2]
-      mean <- df.data.yrmon$mean[ind.2]
-      sd <- df.data.yrmon$sd[ind.2]
-      stat.stor <- c(rbind(med,sd))
+      df.sub <- df.data.yrmon[ind.2,]
+      
+      med <- df.sub$med
+      mean <- df.sub$mean
+      sd <- df.sub$sd
+      stat.stor <- c(rbind(med,sd))         # creates single column with alt med,sd
       
       # get index of month start and end year of series from all years
-      ind.st <- which(A==col.names.mon[1])
-      ind.end <- which(A==tail(col.names.mon,n=1))
+      ind.st <- which(A==df.sub$year[1])
+      ind.end <- which(A==tail(df.sub$year,n=1))
       df.temp[k,(ind.st*2-1):(ind.end*2)] <- as.vector(stat.stor)
+      rm(df.sub)
       
       #-------------------------------------------------------------------- trended
       mon.trend <- as.matrix(df.data.mon.trend[k,1:(ncol(df.data.mon.trend)-2)])
@@ -674,11 +719,14 @@ for (i in 1:nclust){
       ind.yr <- match(unique(col.names.t), col.names.trend)
       
       ind.2 <- which(df.data.yrmon.trend$month==k)
-      med <- df.data.yrmon.trend$med[ind.2]
-      mean <- df.data.yrmon.trend$mean[ind.2]
-      sd <- df.data.yrmon.trend$sd[ind.2]
+      df.sub <- df.data.yrmon.trend[ind.2,]
+      
+      med <- df.sub$med
+      mean <- df.sub$mean
+      sd <- df.sub$sd
       
       stat.stor.trend <- c(rbind(med,sd))
+      rm(df.sub)
       
       # get index of month start and end year of series from all years
       ind.st <- which(A.trend==col.names.t[1])
@@ -694,10 +742,11 @@ for (i in 1:nclust){
         sd.seg <- data.frame(x1=ind.yr-1, y1=sd,
                              x2=c(ind.yr[2:length(ind.yr)],length(mon)), y2=sd)
         
-        #par(mar = c(5,5,2,5))                                          # to plot a second y axis
+        #par(mar = c(5,5,2,5))                # to plot a second y axis
         #par(mfrow=c(2,1), mar=c(4,4,4,1))
         layout(matrix(c(1,1,2), nrow = 3, ncol = 1, byrow = TRUE))
-        plot(mon, typ="l", main=paste(mon.name, stat.name), xaxt="n", ylab="Temperature", xlab="")
+        
+        plot(mon[1,], typ="l", main=paste(mon.name, stat.name), xaxt="n", ylab="Temperature", xlab="")
         #axis(1, at=ind.yr, labels=col.names[ind.yr])
         abline(v=ind.yr, col="gray30")
         segments(med.seg$x1, med.seg$y1, med.seg$x2, med.seg$y2, col="red", lwd=2)
@@ -707,7 +756,7 @@ for (i in 1:nclust){
                text.width=c(0,1,1.5),
                inset=c(0,.4,0), xpd=T, horiz=T, bty='n')
         
-        plot(mon, ylim=c(0,2), type="n", ylab="Standard Deviation", xaxt="n", xlab="Years")
+        plot(mon[1,], ylim=c(0,4), type="n", ylab="Standard Deviation", xaxt="n", xlab="Years")
         segments(sd.seg$x1, sd.seg$y1, sd.seg$x2, sd.seg$y2, col="blue", lwd=2)
         axis(1, at=ind.yr, labels=col.names[ind.yr])
         abline(v=ind.yr, col="gray30")
