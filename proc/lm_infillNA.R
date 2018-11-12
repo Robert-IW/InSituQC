@@ -45,10 +45,94 @@ for (i in 1:ncol(x.in)){
   ref.stat <- x.in[,i]
   ref.name <- dimnames(x.in)[[2]][i]
   
-  plot(y.in, type="l", lwd=2, main=paste(stat.name,"with ref",ref.name),
+  plot(y.in[!is.na(y.in)], type="l", lwd=2, main=paste(stat.name,"with ref",ref.name),
        ylab = "Temperature (°C)")
-  lines(ref.stat, col="blue")
+  legend("topleft", legend = c("Original", "Reference", "Naive LM"), 
+         inset=c(0,-.1), bty = "n", xpd=TRUE, mar(c(3,3,3,3)),
+         cex = 1, lty=1, lwd=3, col=c("black","blue","red"), horiz = T)
+  lines(ref.stat[!is.na(y.in)], col="blue")
+  
+  # 'naive' lm impute
+  df.in.train <- data.frame(cbind(y.in, ref.stat))
+  fit.reg <- lmer(y.in ~ ref.stat + (1|ref.stat), data = df.in.train)
+  df.in.pred <- data.frame(df.in.train[,-1])
+  names(df.in.pred) <- ref.name
+  pred.reg <- predict(fit.reg, newdata = df.in.pred)
+  lines(pred.reg, col = "red")
 
+  # function to interpolate using sliding LM forward/backward, using 4 month window
+  #   to predict 30 day ahead
+  interp.forback <- function(y.in, ref.stat){
+    # create empty vector storing predictions
+    interp.forward <- vector(mode = "numeric", length = length(y.in))
+    interp.backward <- interp.forward
+    
+    cnt.st <- 1
+    cnt.en <- cnt.st + size.window -1
+    
+    while (cnt.en < length(y.in)){
+      if ((cnt.en + size.interp) < (length(y.in)-(2*size.interp))){
+        y.in.sub <- y.in[cnt.st:cnt.en]
+        x.in.sub <- ref.stat[cnt.st:cnt.en]
+        df.in.train <- data.frame(cbind(y.in.sub, x.in.sub))
+        df.in.pred <- data.frame(ref.stat[cnt.en:(cnt.en + size.interp -1)])
+        names(df.in.pred) <- names(df.in.train)[-1]
+        
+        # if there is insufficient data use previous lm
+        if (sum(is.na(df.in.train$y.in.sub)) / nrow(df.in.train) < 0.66){
+          fit.reg <- lm(y.in.sub ~ ., data = df.in.train)
+        } else {
+          print("Reverting to previous LM")
+        }
+        
+        # if the first interation, use model prediction on first 120 days
+        if (cnt.st == 1){
+          pred.first <- predict.lm(fit.reg, newdata=data.frame(df.in.train[,-1]))
+          interp.forward[cnt.st:cnt.en] <- pred.first
+          rm(pred.first)
+          cnt.st <- cnt.st + size.interp
+          cnt.en <- cnt.st + size.window -1
+          print("First interation complete")
+          next
+        }
+        pred.reg <- predict.lm(fit.reg, newdata = df.in.pred)
+        interp.forward[(cnt.en+1):(cnt.en + size.interp)] <- pred.reg
+        
+        cnt.st <- cnt.st + size.interp
+        cnt.en <- cnt.st + size.window -1
+        
+        # to deal with the last segment variable length
+      } else {
+        # if 31 to 60 after 120 training data then extend predict to end
+        if (length(y.in) - cnt.en - size.interp < 2*size.interp){
+          size.interp.tmp <- length(y.in) - cnt.en
+          
+          y.in.sub <- y.in[cnt.st:cnt.en]
+          x.in.sub <- ref.stat[cnt.st:cnt.en]
+          df.in.train <- data.frame(cbind(y.in.sub, x.in.sub))
+          df.in.pred <- data.frame(ref.stat[(cnt.en+1):(cnt.en + size.interp.tmp -1)])
+          names(df.in.pred) <- names(df.in.train)[-1]
+          
+          fit.reg <- lm(y.in.sub ~ ., data = df.in.train)
+          pred.reg <- predict.lm(fit.reg, newdata = df.in.pred)
+          interp.forward[(cnt.en+1):(cnt.en + size.interp.tmp -1)] <- pred.reg
+          print("Reached the end of the series")
+          break
+          
+          # is less than 120 then self predict
+        } else if (length(y.in) - cnt.en <= 120){
+          y.in.sub <- y.in[cnt.st:length(y.in)]
+          x.in.sub <- ref.stat[cnt.st:length(y.in)]
+          df.in.train <- data.frame(cbind(y.in.sub, x.in.sub))
+          pred.last <- predict.lm(fit.reg, newdata=data.frame(df.in.train[,-1]))
+          interp.forward[cnt.en:length(y.in)] <- pred.last
+          rm(pred.last)
+          print("Reached the end of the series")
+          break
+        }
+      }
+    }
+  }
 }
 
 
